@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="pt-BR" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8" />
+    <title>Confirmação de cadastro</title>
+</head>
+<body style="margin:0;padding:0;background:#f8fafc;font-family:Arial,sans-serif;color:#0f172a;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f8fafc;padding:32px 0;">
+    <tr>
+        <td align="center">
+            <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:16px;padding:32px;box-shadow:0 10px 30px rgba(15,23,42,.08);">
+                <tr>
+                    <td>
+                        <h1 style="margin:0 0 16px;font-size:24px;color:#0f172a;" th:text="${applicationName}">Money Master</h1>
+                        <p style="font-size:16px;line-height:1.5;">Olá, <strong th:text="${name}">usuário</strong>.</p>
+                        <p style="font-size:16px;line-height:1.5;">Recebemos seu cadastro. Clique no botão abaixo para confirmar seu e-mail e liberar o acesso ao sistema.</p>
+                        <p style="margin:32px 0;">
+                            <a th:href="${confirmationUrl}" style="display:inline-block;background:#2563eb;color:#ffffff;text-decoration:none;padding:14px 22px;border-radius:10px;font-weight:bold;">Confirmar meu e-mail</a>
+                        </p>
+                        <p style="font-size:13px;line-height:1.5;color:#64748b;">Se o botão não funcionar, copie e cole este link no navegador:</p>
+                        <p style="font-size:13px;line-height:1.5;color:#64748b;word-break:break-all;" th:text="${confirmationUrl}">link</p>
+                    </td>
+                </tr>
+            </table>
+        </td>
+    </tr>
+</table>
+</body>
+</html>
