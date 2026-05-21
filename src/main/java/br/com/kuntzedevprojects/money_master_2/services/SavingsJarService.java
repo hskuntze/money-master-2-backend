@@ -479,7 +479,7 @@ public class SavingsJarService {
         if (request.lastYieldCalculationDate() != null) {
             return request.lastYieldCalculationDate();
         }
-        if (currentAmount.signum() > 0 || currentYield.signum() > 0) {
+        if (currentYield.signum() > 0) {
             return today;
         }
         return null;

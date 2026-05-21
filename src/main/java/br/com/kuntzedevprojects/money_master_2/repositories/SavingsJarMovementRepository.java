@@ -4,6 +4,7 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
@@ -70,5 +71,18 @@ public interface SavingsJarMovementRepository extends JpaRepository<SavingsJarMo
 
     boolean existsBySavingsJarIdAndTypeAndOccurredOn(Long savingsJarId, SavingsJarMovementType type, LocalDate occurredOn);
 
+    boolean existsBySavingsJarIdAndReferenceKey(Long savingsJarId, String referenceKey);
+
     Optional<SavingsJarMovement> findTopBySavingsJarIdAndTypeOrderByOccurredOnDescIdDesc(Long savingsJarId, SavingsJarMovementType type);
+
+    @Query("""
+            select max(m.occurredOn)
+            from SavingsJarMovement m
+            where m.savingsJar.id = :savingsJarId
+              and m.type in :types
+            """)
+    Optional<LocalDate> findLatestMovementDateBySavingsJarIdAndTypes(
+            @Param("savingsJarId") Long savingsJarId,
+            @Param("types") Set<SavingsJarMovementType> types
+    );
 }

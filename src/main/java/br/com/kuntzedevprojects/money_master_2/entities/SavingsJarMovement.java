@@ -19,6 +19,7 @@ import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.Table;
+import jakarta.persistence.UniqueConstraint;
 
 @Entity
 @Table(
@@ -26,6 +27,9 @@ import jakarta.persistence.Table;
         indexes = {
                 @Index(name = "idx_savings_jar_movement_jar_date", columnList = "savings_jar_id,occurred_on"),
                 @Index(name = "idx_savings_jar_movement_type", columnList = "movement_type")
+        },
+        uniqueConstraints = {
+                @UniqueConstraint(name = "uk_savings_jar_movement_reference_key", columnNames = {"savings_jar_id", "reference_key"})
         }
 )
 public class SavingsJarMovement {
@@ -63,6 +67,9 @@ public class SavingsJarMovement {
 
     @Column(length = 80)
     private String rateReference;
+
+    @Column(name = "reference_key", length = 80)
+    private String referenceKey;
 
     @Column(length = 2000)
     private String aiRawMessage;
@@ -156,6 +163,14 @@ public class SavingsJarMovement {
 
     public void setRateReference(String rateReference) {
         this.rateReference = rateReference;
+    }
+
+    public String getReferenceKey() {
+        return referenceKey;
+    }
+
+    public void setReferenceKey(String referenceKey) {
+        this.referenceKey = referenceKey;
     }
 
     public String getAiRawMessage() {
