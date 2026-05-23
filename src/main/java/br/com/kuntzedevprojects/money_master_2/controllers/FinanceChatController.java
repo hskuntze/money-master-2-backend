@@ -25,6 +25,6 @@ public class FinanceChatController {
     @PostMapping
     @PreAuthorize("hasAuthority('AI_CHAT_USE')")
     public ResponseEntity<FinanceChatResponse> chat(@Valid @RequestBody FinanceChatRequest request) {
-        return ResponseEntity.ok(financeChatService.chat(request.message()));
+        return ResponseEntity.ok(financeChatService.chat(request.message(), request.conversationId()));
     }
 }

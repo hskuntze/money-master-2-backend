@@ -62,4 +62,44 @@ public interface FinancialTransactionRepository extends JpaRepository<FinancialT
             @Param("to") LocalDate to,
             @Param("type") TransactionType type
     );
+
+    @Query("""
+            select t
+            from FinancialTransaction t
+            join fetch t.account a
+            left join fetch t.category c
+            where lower(t.owner.email) = lower(:ownerEmail)
+              and c is not null
+              and lower(c.name) = lower(:categoryName)
+              and (:type is null or t.type = :type)
+              and (:from is null or t.occurredOn >= :from)
+              and (:to is null or t.occurredOn <= :to)
+            order by t.occurredOn desc, t.id desc
+            """)
+    List<FinancialTransaction> findByOwnerCategoryNameAndTypeAndPeriod(
+            @Param("ownerEmail") String ownerEmail,
+            @Param("categoryName") String categoryName,
+            @Param("type") TransactionType type,
+            @Param("from") LocalDate from,
+            @Param("to") LocalDate to
+    );
+
+    @Query("""
+            select t
+            from FinancialTransaction t
+            join fetch t.account a
+            left join fetch t.category c
+            where lower(t.owner.email) = lower(:ownerEmail)
+              and t.occurredOn = :occurredOn
+              and (:type is null or t.type = :type)
+              and lower(t.description) like lower(concat('%', :description, '%'))
+            order by t.id desc
+            """)
+    List<FinancialTransaction> findByOwnerDescriptionAndDate(
+            @Param("ownerEmail") String ownerEmail,
+            @Param("description") String description,
+            @Param("occurredOn") LocalDate occurredOn,
+            @Param("type") TransactionType type
+    );
+
 }

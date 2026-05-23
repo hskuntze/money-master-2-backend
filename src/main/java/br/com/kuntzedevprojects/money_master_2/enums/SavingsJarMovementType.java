@@ -6,5 +6,6 @@ public enum SavingsJarMovementType {
     DEPOSIT,
     WITHDRAWAL,
     YIELD,
+    YIELD_ADJUSTMENT,
     ADJUSTMENT
 }

@@ -60,6 +60,53 @@ public class CategoryService {
     }
 
     @Transactional
+    public CategoryResponse createSystem(CategoryCreateRequest request) {
+        String name = normalizeRequired(request.name(), "O nome da categoria é obrigatório.");
+        ensureSystemCategoryDoesNotExist(name, request.type(), null);
+
+        Category category = new Category();
+        category.setOwner(null);
+        category.setName(name);
+        category.setType(request.type());
+        category.setIcon(normalizeNullable(request.icon()));
+        category.setColor(normalizeNullable(request.color()));
+        category.setSystemDefault(true);
+        category.setActive(request.active() == null || request.active());
+
+        return CategoryResponse.from(categoryRepository.save(category));
+    }
+
+    @Transactional
+    public CategoryResponse updateSystem(Long id, CategoryUpdateRequest request) {
+        Category category = findSystemCategory(id);
+
+        String newName = request.name() != null && !request.name().isBlank() ? request.name().trim() : category.getName();
+        TransactionType newType = request.type() == null ? category.getType() : request.type();
+        ensureSystemCategoryDoesNotExist(newName, newType, id);
+
+        category.setName(newName);
+        category.setType(newType);
+
+        if (request.icon() != null) {
+            category.setIcon(normalizeNullable(request.icon()));
+        }
+        if (request.color() != null) {
+            category.setColor(normalizeNullable(request.color()));
+        }
+        if (request.active() != null) {
+            category.setActive(request.active());
+        }
+
+        return CategoryResponse.from(category);
+    }
+
+    @Transactional
+    public void deactivateSystem(Long id) {
+        Category category = findSystemCategory(id);
+        category.setActive(false);
+    }
+
+    @Transactional
     public CategoryResponse update(String ownerEmail, Long id, CategoryUpdateRequest request) {
         Category category = findOwnedUserCategory(ownerEmail, id);
 
@@ -126,6 +173,15 @@ public class CategoryService {
                 .orElseThrow(() -> new ResourceNotFoundException("Categoria não encontrada."));
     }
 
+    private Category findSystemCategory(Long id) {
+        Category category = categoryRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Categoria não encontrada."));
+        if (!category.isSystemDefault()) {
+            throw new BusinessException("Esta categoria não é uma categoria padrão do sistema.");
+        }
+        return category;
+    }
+
     private Category findOwnedUserCategory(String ownerEmail, Long id) {
         Category category = categoryRepository.findAvailableById(id, ownerEmail)
                 .orElseThrow(() -> new ResourceNotFoundException("Categoria não encontrada."));
@@ -136,6 +192,14 @@ public class CategoryService {
             throw new BusinessException("Esta categoria não pertence ao usuário autenticado.");
         }
         return category;
+    }
+
+    private void ensureSystemCategoryDoesNotExist(String name, TransactionType type, Long ignoreId) {
+        categoryRepository.findSystemDefaultByNameAndType(name, type)
+                .filter(existing -> ignoreId == null || !existing.getId().equals(ignoreId))
+                .ifPresent(existing -> {
+                    throw new BusinessException("Já existe uma categoria padrão do sistema com este nome e tipo.");
+                });
     }
 
     private void ensureUserCategoryDoesNotExist(String ownerEmail, String name, TransactionType type, Long ignoreId) {

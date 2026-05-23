@@ -8,7 +8,11 @@ import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
 import org.springframework.stereotype.Component;
 
+import br.com.kuntzedevprojects.money_master_2.dtos.ai.FinanceCommandBatchRequest;
+import br.com.kuntzedevprojects.money_master_2.dtos.ai.FinanceCommandBatchResponse;
+import br.com.kuntzedevprojects.money_master_2.dtos.ai.FinanceContextResponse;
 import br.com.kuntzedevprojects.money_master_2.dtos.ai.ToolSavingsJarResponse;
+import br.com.kuntzedevprojects.money_master_2.dtos.ai.ToolTransactionCategoryUpdateResponse;
 import br.com.kuntzedevprojects.money_master_2.dtos.ai.ToolTransactionResponse;
 import br.com.kuntzedevprojects.money_master_2.dtos.finance.AccountBalanceResponse;
 import br.com.kuntzedevprojects.money_master_2.dtos.finance.AccountResponse;
@@ -20,6 +24,7 @@ import br.com.kuntzedevprojects.money_master_2.enums.TransactionType;
 import br.com.kuntzedevprojects.money_master_2.services.AccountService;
 import br.com.kuntzedevprojects.money_master_2.services.CategoryService;
 import br.com.kuntzedevprojects.money_master_2.services.CurrentUserService;
+import br.com.kuntzedevprojects.money_master_2.services.FinanceCommandExecutor;
 import br.com.kuntzedevprojects.money_master_2.services.FinancialReportService;
 import br.com.kuntzedevprojects.money_master_2.services.FinancialTransactionService;
 import br.com.kuntzedevprojects.money_master_2.services.SavingsJarService;
@@ -33,6 +38,7 @@ public class FinanceAiTools {
     private final FinancialTransactionService transactionService;
     private final FinancialReportService reportService;
     private final SavingsJarService savingsJarService;
+    private final FinanceCommandExecutor commandExecutor;
 
     public FinanceAiTools(
             CurrentUserService currentUserService,
@@ -40,7 +46,8 @@ public class FinanceAiTools {
             CategoryService categoryService,
             FinancialTransactionService transactionService,
             FinancialReportService reportService,
-            SavingsJarService savingsJarService
+            SavingsJarService savingsJarService,
+            FinanceCommandExecutor commandExecutor
     ) {
         this.currentUserService = currentUserService;
         this.accountService = accountService;
@@ -48,6 +55,31 @@ public class FinanceAiTools {
         this.transactionService = transactionService;
         this.reportService = reportService;
         this.savingsJarService = savingsJarService;
+        this.commandExecutor = commandExecutor;
+    }
+
+
+    @Tool(description = "Obtém um contexto financeiro consolidado do usuário autenticado: contas, saldos, categorias, cofrinhos e opcionalmente as últimas transações de um período. Use antes de montar comandos quando houver nomes livres, referências como 'meus cofrinhos' ou pedidos de atualização em lote.")
+    public FinanceContextResponse getFinanceContext(
+            @ToolParam(description = "Data inicial no formato yyyy-MM-dd. Pode ficar vazio.") String from,
+            @ToolParam(description = "Data final no formato yyyy-MM-dd. Pode ficar vazio.") String to,
+            @ToolParam(description = "true para incluir até 50 transações recentes do período ou dos últimos 30 dias.") Boolean includeRecentTransactions
+    ) {
+        return commandExecutor.getContext(currentUserService.currentEmail(), from, to, includeRecentTransactions);
+    }
+
+    @Tool(description = "Gera uma prévia de comandos financeiros estruturados sem alterar o banco. Use para operações em lote, alterações potencialmente ambíguas ou quando quiser validar antes de executar. O usuário pode confirmar no próximo turno.")
+    public FinanceCommandBatchResponse previewFinanceCommands(
+            @ToolParam(description = "Lote de comandos financeiros estruturados. Use dryRun=true na prévia.") FinanceCommandBatchRequest request
+    ) {
+        return commandExecutor.preview(currentUserService.currentEmail(), request);
+    }
+
+    @Tool(description = "Executa comandos financeiros estruturados no backend. Use somente quando a intenção estiver clara ou quando o usuário já tiver confirmado uma prévia. Nunca execute exclusões ou alterações em massa sem confirmação prévia.")
+    public FinanceCommandBatchResponse executeFinanceCommands(
+            @ToolParam(description = "Lote de comandos financeiros estruturados. Use dryRun=false para executar.") FinanceCommandBatchRequest request
+    ) {
+        return commandExecutor.execute(currentUserService.currentEmail(), request);
     }
 
     @Tool(description = "Lista as contas financeiras ativas e inativas do usuário autenticado. Use para escolher a conta correta antes de registrar gastos ou receitas quando a mensagem mencionar uma conta.")
@@ -145,7 +177,7 @@ public class FinanceAiTools {
         return savingsJarService.withdrawFromAi(currentUserService.currentEmail(), name, institutionName, amount, occurredOn, originalMessage);
     }
 
-    @Tool(description = "Registra manualmente rendimento em um cofrinho existente. Use quando o usuário disser que o cofrinho rendeu determinado valor no app do banco.")
+    @Tool(description = "Registra manualmente um novo rendimento em um cofrinho existente, somando o valor informado ao rendimento atual. Use quando o usuário disser que o cofrinho rendeu MAIS determinado valor ou quando estiver registrando um rendimento do dia/período. Se o usuário disser rendimento real, na realidade foi, corrija para ou ajuste para, use a ferramenta de reconciliação de rendimento real.")
     public ToolSavingsJarResponse registerSavingsJarYield(
             @ToolParam(description = "Nome do cofrinho.") String name,
             @ToolParam(description = "Banco ou instituição do cofrinho. Pode ser vazio.") String institutionName,
@@ -154,6 +186,55 @@ public class FinanceAiTools {
             @ToolParam(description = "Mensagem original do usuário.") String originalMessage
     ) {
         return savingsJarService.registerYieldFromAi(currentUserService.currentEmail(), name, institutionName, amount, occurredOn, originalMessage);
+    }
+
+    @Tool(description = "Corrige/reconcilia o rendimento acumulado real de um cofrinho. Use quando o usuário disser frases como 'na realidade o rendimento do cofrinho X foi R$...', 'o rendimento real do cofrinho X é/foi R$...' ou 'corrija o rendimento do cofrinho para R$...'. Esta ferramenta NÃO soma um novo rendimento: ela calcula a diferença entre o rendimento registrado e o rendimento real informado.")
+    public ToolSavingsJarResponse reconcileSavingsJarRealYield(
+            @ToolParam(description = "Nome do cofrinho.") String name,
+            @ToolParam(description = "Banco ou instituição do cofrinho. Pode ser vazio.") String institutionName,
+            @ToolParam(description = "Rendimento real acumulado informado pelo usuário. Use valor positivo ou zero, sem sinal.") BigDecimal realYieldAmount,
+            @ToolParam(description = "Data de referência da correção no formato yyyy-MM-dd. Se o usuário não mencionar data, use a data atual informada no prompt do sistema.") String occurredOn,
+            @ToolParam(description = "Mensagem original do usuário.") String originalMessage
+    ) {
+        return savingsJarService.correctYieldFromAi(currentUserService.currentEmail(), name, institutionName, realYieldAmount, occurredOn, originalMessage);
+    }
+
+    @Tool(description = "Troca a categoria de várias transações encontradas pela categoria atual. Use quando o usuário pedir algo como 'troque as transações da categoria Outro para Cartão de crédito'. Se a nova categoria não existir para o usuário, o backend cria automaticamente.")
+    public ToolTransactionCategoryUpdateResponse updateTransactionsCategoryByCategoryName(
+            @ToolParam(description = "Nome da categoria atual que será substituída. Exemplo: Outros.") String oldCategoryName,
+            @ToolParam(description = "Nome da nova categoria. Exemplo: Cartão de crédito.") String newCategoryName,
+            @ToolParam(description = "Tipo das transações: INCOME, EXPENSE ou TRANSFER. Se o usuário não informar e todas as transações encontradas forem do mesmo tipo, pode ficar vazio.") String type,
+            @ToolParam(description = "Data inicial no formato yyyy-MM-dd. Pode ficar vazio se o usuário não limitar período.") String from,
+            @ToolParam(description = "Data final no formato yyyy-MM-dd. Pode ficar vazio se o usuário não limitar período.") String to,
+            @ToolParam(description = "Mensagem original do usuário.") String originalMessage
+    ) {
+        return transactionService.updateTransactionsCategoryByCategoryNameFromAi(
+                currentUserService.currentEmail(),
+                oldCategoryName,
+                newCategoryName,
+                type,
+                from,
+                to,
+                originalMessage
+        );
+    }
+
+    @Tool(description = "Troca a categoria de uma transação específica identificada por descrição e data. Use quando o usuário pedir algo como 'troque a categoria da transação mercado do dia 2026-05-20 para Alimentação'. Se a nova categoria não existir para o usuário, o backend cria automaticamente.")
+    public ToolTransactionCategoryUpdateResponse updateTransactionCategoryByDescriptionAndDate(
+            @ToolParam(description = "Trecho da descrição da transação a localizar. Exemplo: mercado, almoço, Uber.") String description,
+            @ToolParam(description = "Data da transação no formato yyyy-MM-dd. Se o usuário disser hoje, use a data atual informada no prompt do sistema.") String occurredOn,
+            @ToolParam(description = "Nome da nova categoria.") String newCategoryName,
+            @ToolParam(description = "Tipo da transação: INCOME, EXPENSE ou TRANSFER. Pode ficar vazio se o usuário não informar.") String type,
+            @ToolParam(description = "Mensagem original do usuário.") String originalMessage
+    ) {
+        return transactionService.updateTransactionCategoryByDescriptionAndDateFromAi(
+                currentUserService.currentEmail(),
+                description,
+                occurredOn,
+                newCategoryName,
+                type,
+                originalMessage
+        );
     }
 
     private TransactionType parseTransactionTypeOrNull(String type) {

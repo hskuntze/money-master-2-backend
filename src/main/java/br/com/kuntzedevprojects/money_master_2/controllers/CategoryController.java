@@ -71,4 +71,27 @@ public class CategoryController {
         categoryService.deactivate(principal.getName(), id);
         return ResponseEntity.ok(new MessageResponse("Categoria desativada com sucesso."));
     }
+
+    @PostMapping("/system")
+    @PreAuthorize("hasAuthority('CATEGORY_SYSTEM_MANAGE')")
+    public ResponseEntity<CategoryResponse> createSystem(@Valid @RequestBody CategoryCreateRequest request) {
+        return ResponseEntity.status(HttpStatus.CREATED).body(categoryService.createSystem(request));
+    }
+
+    @PutMapping("/system/{id}")
+    @PreAuthorize("hasAuthority('CATEGORY_SYSTEM_MANAGE')")
+    public ResponseEntity<CategoryResponse> updateSystem(
+            @PathVariable Long id,
+            @Valid @RequestBody CategoryUpdateRequest request
+    ) {
+        return ResponseEntity.ok(categoryService.updateSystem(id, request));
+    }
+
+    @DeleteMapping("/system/{id}")
+    @PreAuthorize("hasAuthority('CATEGORY_SYSTEM_MANAGE')")
+    public ResponseEntity<MessageResponse> deactivateSystem(@PathVariable Long id) {
+        categoryService.deactivateSystem(id);
+        return ResponseEntity.ok(new MessageResponse("Categoria padrão do sistema desativada com sucesso."));
+    }
+
 }

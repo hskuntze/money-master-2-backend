@@ -252,7 +252,7 @@ public class SavingsJarYieldService {
     private LocalDate latestAppliedYieldDate(SavingsJar jar) {
         return movementRepository.findLatestMovementDateBySavingsJarIdAndTypes(
                 jar.getId(),
-                Set.of(SavingsJarMovementType.YIELD, SavingsJarMovementType.INITIAL_YIELD)
+                Set.of(SavingsJarMovementType.YIELD, SavingsJarMovementType.INITIAL_YIELD, SavingsJarMovementType.YIELD_ADJUSTMENT)
         ).orElse(null);
     }
 

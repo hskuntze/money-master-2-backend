@@ -26,6 +26,8 @@ import br.com.kuntzedevprojects.money_master_2.dtos.savingsjar.SavingsJarMovemen
 import br.com.kuntzedevprojects.money_master_2.dtos.savingsjar.SavingsJarResponse;
 import br.com.kuntzedevprojects.money_master_2.dtos.savingsjar.SavingsJarSummaryResponse;
 import br.com.kuntzedevprojects.money_master_2.dtos.savingsjar.SavingsJarUpdateRequest;
+import br.com.kuntzedevprojects.money_master_2.dtos.savingsjar.SavingsJarYieldCorrectionRequest;
+import br.com.kuntzedevprojects.money_master_2.dtos.savingsjar.SavingsJarYieldCorrectionResponse;
 import br.com.kuntzedevprojects.money_master_2.services.SavingsJarService;
 import jakarta.validation.Valid;
 
@@ -117,6 +119,16 @@ public class SavingsJarController {
             Principal principal
     ) {
         return ResponseEntity.status(HttpStatus.CREATED).body(savingsJarService.registerManualYield(principal.getName(), id, request));
+    }
+
+    @PostMapping("/{id}/yield/corrections")
+    @PreAuthorize("hasAuthority('FINANCE_MANAGE')")
+    public ResponseEntity<SavingsJarYieldCorrectionResponse> correctYield(
+            @PathVariable Long id,
+            @Valid @RequestBody SavingsJarYieldCorrectionRequest request,
+            Principal principal
+    ) {
+        return ResponseEntity.status(HttpStatus.CREATED).body(savingsJarService.correctYield(principal.getName(), id, request));
     }
 
     @PostMapping("/{id}/yield/apply")

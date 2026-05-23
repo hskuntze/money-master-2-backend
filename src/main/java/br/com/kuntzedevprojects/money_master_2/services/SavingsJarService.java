@@ -4,7 +4,13 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.ZoneId;
+import java.text.Normalizer;
+import java.util.Comparator;
 import java.util.List;
+import java.util.Objects;
+import java.util.Set;
+import java.util.stream.Collectors;
+import java.util.Arrays;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -12,12 +18,15 @@ import org.springframework.transaction.annotation.Transactional;
 import br.com.kuntzedevprojects.money_master_2.config.properties.SavingsJarYieldProperties;
 import br.com.kuntzedevprojects.money_master_2.dtos.ai.ToolSavingsJarResponse;
 import br.com.kuntzedevprojects.money_master_2.dtos.savingsjar.SavingsJarApplyYieldResponse;
+import br.com.kuntzedevprojects.money_master_2.dtos.savingsjar.SavingsJarBalanceCorrectionResponse;
 import br.com.kuntzedevprojects.money_master_2.dtos.savingsjar.SavingsJarCreateRequest;
 import br.com.kuntzedevprojects.money_master_2.dtos.savingsjar.SavingsJarMovementRequest;
 import br.com.kuntzedevprojects.money_master_2.dtos.savingsjar.SavingsJarMovementResponse;
 import br.com.kuntzedevprojects.money_master_2.dtos.savingsjar.SavingsJarResponse;
 import br.com.kuntzedevprojects.money_master_2.dtos.savingsjar.SavingsJarSummaryResponse;
 import br.com.kuntzedevprojects.money_master_2.dtos.savingsjar.SavingsJarUpdateRequest;
+import br.com.kuntzedevprojects.money_master_2.dtos.savingsjar.SavingsJarYieldCorrectionRequest;
+import br.com.kuntzedevprojects.money_master_2.dtos.savingsjar.SavingsJarYieldCorrectionResponse;
 import br.com.kuntzedevprojects.money_master_2.dtos.savingsjar.SavingsJarYieldPreviewResponse;
 import br.com.kuntzedevprojects.money_master_2.entities.Account;
 import br.com.kuntzedevprojects.money_master_2.entities.SavingsJar;
@@ -269,6 +278,65 @@ public class SavingsJarService {
         return SavingsJarMovementResponse.from(movement);
     }
 
+    @Transactional
+    public SavingsJarYieldCorrectionResponse correctYield(String ownerEmail, Long id, SavingsJarYieldCorrectionRequest request) {
+        return correctYield(ownerEmail, id, request, TransactionSource.MANUAL);
+    }
+
+    private SavingsJarYieldCorrectionResponse correctYield(String ownerEmail, Long id, SavingsJarYieldCorrectionRequest request, TransactionSource source) {
+        SavingsJar jar = findOwnedJar(ownerEmail, id);
+        LocalDate occurredOn = request.occurredOn() == null ? today() : request.occurredOn();
+        BigDecimal realYieldAmount = nullToZero(request.realYieldAmount()).setScale(2, RoundingMode.HALF_UP);
+        if (realYieldAmount.signum() < 0) {
+            throw new BusinessException("O rendimento real não pode ser negativo.");
+        }
+
+        BigDecimal previousYieldAmount = yieldService.totalYield(jar.getId(), occurredOn).setScale(2, RoundingMode.HALF_UP);
+        BigDecimal adjustmentAmount = realYieldAmount.subtract(previousYieldAmount).setScale(2, RoundingMode.HALF_UP);
+        if (adjustmentAmount.signum() == 0) {
+            throw new BusinessException("O rendimento informado já é igual ao rendimento registrado para esta data.");
+        }
+
+        BigDecimal currentAmountBeforeAdjustment = yieldService.currentAmount(jar.getId(), null);
+        if (currentAmountBeforeAdjustment.add(adjustmentAmount).signum() < 0) {
+            throw new BusinessException("A correção de rendimento deixaria o saldo atual do cofrinho negativo.");
+        }
+
+        SavingsJarMovement movement = saveMovement(
+                jar,
+                SavingsJarMovementType.YIELD_ADJUSTMENT,
+                adjustmentAmount,
+                occurredOn,
+                normalizeNullableOrDefault(request.description(), "Correção de rendimento conforme valor real informado"),
+                source == null ? TransactionSource.MANUAL : source,
+                currentAmountBeforeAdjustment,
+                null,
+                "REAL_YIELD:" + realYieldAmount,
+                normalizeNullable(request.notes())
+        );
+
+        if (jar.getLastYieldCalculationDate() == null || jar.getLastYieldCalculationDate().isBefore(occurredOn)) {
+            jar.setLastYieldCalculationDate(occurredOn);
+        }
+
+        BigDecimal currentAmountAfterAdjustment = yieldService.currentAmount(jar.getId(), null);
+        String message = adjustmentAmount.signum() > 0
+                ? "Correção aplicada. O rendimento registrado foi aumentado para bater com o valor real informado."
+                : "Correção aplicada. O rendimento registrado foi reduzido para bater com o valor real informado.";
+
+        return new SavingsJarYieldCorrectionResponse(
+                jar.getId(),
+                jar.getName(),
+                occurredOn,
+                previousYieldAmount,
+                realYieldAmount,
+                adjustmentAmount,
+                currentAmountAfterAdjustment,
+                SavingsJarMovementResponse.from(movement),
+                message
+        );
+    }
+
     @Transactional(readOnly = true)
     public List<SavingsJarMovementResponse> movements(String ownerEmail, Long id) {
         SavingsJar jar = findOwnedJar(ownerEmail, id);
@@ -375,6 +443,140 @@ public class SavingsJarService {
         return toToolResponse(toResponse(jar), "Rendimento registrado com sucesso.");
     }
 
+    @Transactional
+    public ToolSavingsJarResponse correctYieldFromAi(
+            String ownerEmail,
+            String name,
+            String institutionName,
+            BigDecimal realYieldAmount,
+            String occurredOnText,
+            String originalMessage
+    ) {
+        SavingsJar jar = resolveForAi(ownerEmail, name, institutionName);
+        SavingsJarYieldCorrectionRequest request = new SavingsJarYieldCorrectionRequest(
+                realYieldAmount,
+                parseDateOrToday(occurredOnText),
+                "Correção de rendimento informada pelo chat",
+                originalMessage
+        );
+        SavingsJarYieldCorrectionResponse correction = correctYield(ownerEmail, jar.getId(), request, TransactionSource.AI_CHAT);
+        BigDecimal difference = correction.adjustmentAmount();
+        String message = "Rendimento real reconciliado com sucesso. Diferença aplicada: " + difference + ".";
+        return toToolResponse(toResponse(jar), message);
+    }
+
+    @Transactional
+    public SavingsJarBalanceCorrectionResponse correctCurrentBalanceFromAi(
+            String ownerEmail,
+            String name,
+            String institutionName,
+            BigDecimal realCurrentAmount,
+            String occurredOnText,
+            String previousDateText,
+            String originalMessage
+    ) {
+        return correctCurrentBalance(ownerEmail, name, institutionName, realCurrentAmount, occurredOnText, previousDateText,
+                originalMessage, false);
+    }
+
+    @Transactional(readOnly = true)
+    public SavingsJarBalanceCorrectionResponse previewCurrentBalanceCorrectionFromAi(
+            String ownerEmail,
+            String name,
+            String institutionName,
+            BigDecimal realCurrentAmount,
+            String occurredOnText,
+            String previousDateText,
+            String originalMessage
+    ) {
+        return correctCurrentBalance(ownerEmail, name, institutionName, realCurrentAmount, occurredOnText, previousDateText,
+                originalMessage, true);
+    }
+
+    private SavingsJarBalanceCorrectionResponse correctCurrentBalance(
+            String ownerEmail,
+            String name,
+            String institutionName,
+            BigDecimal realCurrentAmount,
+            String occurredOnText,
+            String previousDateText,
+            String originalMessage,
+            boolean dryRun
+    ) {
+        SavingsJar jar = resolveForAi(ownerEmail, name, institutionName);
+        LocalDate occurredOn = parseDateOrToday(occurredOnText);
+        LocalDate previousDate = parseDateOrNull(previousDateText);
+        if (previousDate == null) {
+            previousDate = occurredOn.minusDays(1);
+        }
+        if (previousDate.isAfter(occurredOn)) {
+            throw new BusinessException("A data anterior não pode ser posterior à data atual da correção.");
+        }
+
+        BigDecimal realAmount = nullToZero(realCurrentAmount).setScale(2, RoundingMode.HALF_UP);
+        if (realAmount.signum() < 0) {
+            throw new BusinessException("O saldo real do cofrinho não pode ser negativo.");
+        }
+
+        BigDecimal previousAmount = yieldService.currentAmount(jar.getId(), previousDate).setScale(2, RoundingMode.HALF_UP);
+        BigDecimal principalEffect = movementRepository.sumPrincipalEffectBetween(jar.getId(), previousDate, occurredOn)
+                .setScale(2, RoundingMode.HALF_UP);
+        BigDecimal periodYield = realAmount.subtract(previousAmount).subtract(principalEffect).setScale(2, RoundingMode.HALF_UP);
+        BigDecimal systemCurrentBeforeCorrection = yieldService.currentAmount(jar.getId(), null).setScale(2, RoundingMode.HALF_UP);
+        BigDecimal adjustmentAmount = realAmount.subtract(systemCurrentBeforeCorrection).setScale(2, RoundingMode.HALF_UP);
+
+        if (systemCurrentBeforeCorrection.add(adjustmentAmount).signum() < 0) {
+            throw new BusinessException("A correção deixaria o saldo atual do cofrinho negativo.");
+        }
+
+        SavingsJarMovementResponse movementResponse = null;
+        BigDecimal currentAmountAfterCorrection = realAmount;
+        String message;
+        if (adjustmentAmount.signum() == 0) {
+            message = "O saldo informado já é igual ao saldo registrado no sistema. Nenhum ajuste foi necessário.";
+            currentAmountAfterCorrection = systemCurrentBeforeCorrection;
+        } else if (dryRun) {
+            message = "Prévia calculada. Confirme para aplicar o ajuste de saldo/rendimento no cofrinho.";
+        } else {
+            SavingsJarMovement movement = saveMovement(
+                    jar,
+                    SavingsJarMovementType.YIELD_ADJUSTMENT,
+                    adjustmentAmount,
+                    occurredOn,
+                    "Correção de saldo real conforme banco",
+                    TransactionSource.AI_CHAT,
+                    systemCurrentBeforeCorrection,
+                    null,
+                    "REAL_BALANCE:" + realAmount + ";PERIOD_YIELD:" + periodYield,
+                    normalizeNullable(originalMessage)
+            );
+            if (jar.getLastYieldCalculationDate() == null || jar.getLastYieldCalculationDate().isBefore(occurredOn)) {
+                jar.setLastYieldCalculationDate(occurredOn);
+            }
+            movementResponse = SavingsJarMovementResponse.from(movement);
+            currentAmountAfterCorrection = yieldService.currentAmount(jar.getId(), null).setScale(2, RoundingMode.HALF_UP);
+            message = adjustmentAmount.signum() > 0
+                    ? "Saldo real reconciliado. Foi aplicado um ajuste positivo de rendimento."
+                    : "Saldo real reconciliado. Foi aplicado um ajuste negativo de rendimento.";
+        }
+
+        return new SavingsJarBalanceCorrectionResponse(
+                jar.getId(),
+                jar.getName(),
+                jar.getInstitutionName(),
+                occurredOn,
+                previousDate,
+                previousAmount,
+                realAmount,
+                systemCurrentBeforeCorrection,
+                adjustmentAmount,
+                periodYield,
+                currentAmountAfterCorrection,
+                movementResponse,
+                message
+        );
+    }
+
     @Transactional(readOnly = true)
     public SavingsJar findOwnedJar(String ownerEmail, Long id) {
         return savingsJarRepository.findByIdAndOwnerEmailWithAccount(id, ownerEmail)
@@ -384,8 +586,69 @@ public class SavingsJarService {
     @Transactional(readOnly = true)
     public SavingsJar resolveForAi(String ownerEmail, String name, String institutionName) {
         String normalizedName = normalizeRequired(name, "Informe o nome do cofrinho.");
-        return savingsJarRepository.findByOwnerEmailAndNameAndInstitution(ownerEmail, normalizedName, normalizeNullable(institutionName))
-                .orElseThrow(() -> new ResourceNotFoundException("Cofrinho não encontrado para este usuário."));
+        String normalizedInstitution = normalizeNullable(institutionName);
+
+        if (normalizedInstitution != null) {
+            return savingsJarRepository.findByOwnerEmailAndNameAndInstitution(ownerEmail, normalizedName, normalizedInstitution)
+                    .orElseGet(() -> resolveByFlexibleName(ownerEmail, normalizedName, normalizedInstitution));
+        }
+
+        return savingsJarRepository.findByOwnerEmailWithAccount(ownerEmail)
+                .stream()
+                .filter(SavingsJar::isActive)
+                .filter(jar -> namesMatch(jar.getName(), normalizedName))
+                .min(Comparator.comparing(SavingsJar::getName))
+                .orElseGet(() -> resolveByFlexibleName(ownerEmail, normalizedName, null));
+    }
+
+    private SavingsJar resolveByFlexibleName(String ownerEmail, String name, String institutionName) {
+        List<SavingsJar> candidates = savingsJarRepository.findByOwnerEmailWithAccount(ownerEmail)
+                .stream()
+                .filter(SavingsJar::isActive)
+                .filter(jar -> institutionName == null || Objects.equals(normalizeComparable(jar.getInstitutionName()), normalizeComparable(institutionName)))
+                .filter(jar -> namesMatch(jar.getName(), name))
+                .toList();
+
+        if (candidates.size() == 1) {
+            return candidates.get(0);
+        }
+        if (candidates.size() > 1) {
+            throw new BusinessException("Encontrei mais de um cofrinho com nome parecido. Informe também a instituição/banco para diferenciar.");
+        }
+        throw new ResourceNotFoundException("Cofrinho não encontrado para este usuário. Confira o nome ou peça para listar seus cofrinhos.");
+    }
+
+    private boolean namesMatch(String candidate, String requested) {
+        String left = normalizeComparable(candidate);
+        String right = normalizeComparable(requested);
+        if (left.equals(right) || left.contains(right) || right.contains(left)) {
+            return true;
+        }
+
+        Set<String> leftTokens = Arrays.stream(left.split(" ")).collect(Collectors.toSet());
+        Set<String> rightTokens = Arrays.stream(right.split(" ")).collect(Collectors.toSet());
+        long common = rightTokens.stream()
+                .filter(token -> !token.isBlank())
+                .filter(leftTokens::contains)
+                .count();
+        int relevantTokens = (int) rightTokens.stream().filter(token -> !token.isBlank()).count();
+        return relevantTokens > 0 && common >= Math.max(1, Math.ceil(relevantTokens * 0.6));
+    }
+
+    private String normalizeComparable(String value) {
+        if (value == null) {
+            return "";
+        }
+        String normalized = Normalizer.normalize(value, Normalizer.Form.NFD)
+                .replaceAll("\\p{M}", "")
+                .toLowerCase()
+                .replace("r$", " ")
+                .replace("reais", " ")
+                .replaceAll("(\\d+)\\s*k\\b", "$1 mil")
+                .replaceAll("[^a-z0-9]+", " ")
+                .replaceAll("\\s+", " ")
+                .trim();
+        return normalized;
     }
 
     private SavingsJarResponse toResponse(SavingsJar jar) {
