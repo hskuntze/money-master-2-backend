@@ -6,6 +6,8 @@ import java.time.format.DateTimeFormatter;
 import java.util.Arrays;
 import java.util.List;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -19,6 +21,7 @@ import br.com.kuntzedevprojects.money_master_2.repositories.BcbDailyRateReposito
 @Service
 public class BcbSgsService {
 
+    private static final Logger logger = LoggerFactory.getLogger(BcbSgsService.class);
     private static final DateTimeFormatter BCB_DATE_FORMATTER = DateTimeFormatter.ofPattern("dd/MM/yyyy");
 
     private final RestClient restClient;
@@ -43,7 +46,7 @@ public class BcbSgsService {
         try {
             fetchAndStoreRates(properties.getCdiSeriesCode(), from, to);
         } catch (Exception ex) {
-            // Mantém o sistema utilizável com as taxas já cacheadas em banco quando a API do BCB estiver indisponível.
+            logger.warn("Não foi possível consultar o CDI no SGS/BCB entre {} e {}. Usando somente taxas cacheadas. Causa: {}", from, to, ex.getMessage());
         }
         return rateRepository
                 .findBySeriesCodeAndReferenceDateBetweenOrderByReferenceDateAsc(properties.getCdiSeriesCode(), from, to)
@@ -59,7 +62,7 @@ public class BcbSgsService {
         try {
             fetchAndStoreRates(properties.getCdiSeriesCode(), from, reference);
         } catch (Exception ex) {
-            // Mantém o sistema utilizável com a última taxa cacheada em banco quando a API do BCB estiver indisponível.
+            logger.warn("Não foi possível consultar o CDI mais recente no SGS/BCB até {}. Usando somente taxa cacheada. Causa: {}", reference, ex.getMessage());
         }
 
         return rateRepository

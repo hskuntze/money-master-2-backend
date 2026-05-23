@@ -6,9 +6,10 @@ import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 import br.com.kuntzedevprojects.money_master_2.config.properties.FinanceAiProperties;
 import br.com.kuntzedevprojects.money_master_2.dtos.ai.FinanceChatResponse;
@@ -22,6 +23,8 @@ import br.com.kuntzedevprojects.money_master_2.tools.FinanceAiTools;
 
 @Service
 public class FinanceChatService {
+
+    private static final Logger logger = LoggerFactory.getLogger(FinanceChatService.class);
 
     private final ChatClient chatClient;
     private final FinanceAiTools financeAiTools;
@@ -46,7 +49,6 @@ public class FinanceChatService {
         this.messageRepository = messageRepository;
     }
 
-    @Transactional
     public FinanceChatResponse chat(String message, String conversationId) {
         String ownerEmail = currentUserService.currentEmail();
         AiChatConversation conversation = resolveConversation(ownerEmail, conversationId, message);
@@ -63,6 +65,9 @@ public class FinanceChatService {
                     .tools(financeAiTools)
                     .call()
                     .content();
+        } catch (RuntimeException ex) {
+            logger.error("Erro ao processar chat financeiro. conversationId={}", conversation.getConversationKey(), ex);
+            throw ex;
         } finally {
             FinanceAiConversationContext.clear();
         }
@@ -144,7 +149,7 @@ public class FinanceChatService {
                 - As tools antigas continuam disponíveis, mas os comandos estruturados são o caminho preferencial para novas capacidades.
 
                 Comandos estruturados disponíveis:
-                - REGISTER_TRANSACTION: registrar receita, despesa ou transferência.
+                - REGISTER_TRANSACTION: registrar receita, despesa ou transferência avulsa.
                 - CHANGE_TRANSACTION_CATEGORY_BY_CATEGORY: trocar categoria de várias transações por categoria atual.
                 - CHANGE_TRANSACTION_CATEGORY_BY_DESCRIPTION_DATE: trocar categoria de uma transação por descrição e data.
                 - CREATE_CATEGORY: criar categoria personalizada do usuário.
@@ -153,6 +158,13 @@ public class FinanceChatService {
                 - REGISTER_SAVINGS_JAR_YIELD: somar um novo rendimento informado ao cofrinho.
                 - RECONCILE_SAVINGS_JAR_YIELD: corrigir o rendimento acumulado real.
                 - RECONCILE_SAVINGS_JAR_BALANCE: corrigir o saldo atual real informado pelo banco; use quando o usuário disser "agora está com R$ X", "saldo real é R$ X" ou enviar uma lista de saldos atuais.
+                - CREATE_MONTHLY_PLAN_ITEM: criar uma conta/renda planejada no ciclo mensal, sem criar transação real.
+                - PAY_MONTHLY_PLAN_ITEM: dar baixa em conta/renda planejada. O backend tenta primeiro associar transação existente; se não encontrar correspondência segura, cria uma transação de baixa.
+                - REOPEN_MONTHLY_PLAN_ITEM: desfazer baixa/recebimento, marcar item planejado como pendente e opcionalmente excluir transações vinculadas registradas por engano.
+                - INCREASE_MONTHLY_PLAN_ITEM_EXPECTED_AMOUNT: aumentar o valor previsto de um item planejado, sem dar baixa e sem marcar como pago. Use para compras no cartão/fatura quando o usuário está informando gasto ainda não pago.
+                - CREATE_INSTALLMENT_MONTHLY_PLAN_ITEMS: distribuir parcelas em ciclos mensais futuros, criando ciclos quando necessário e somando o valor previsto em cada mês sem baixa. Use para compras parceladas como "4x de R$ 100".
+                - LINK_TRANSACTION_TO_MONTHLY_PLAN_ITEM: associar uma transação já registrada a uma conta/renda planejada, sem criar lançamento novo.
+                - RECONCILE_MONTHLY_PLAN_WITH_TRANSACTIONS: reconciliar lote de transações do ciclo com contas/rendas planejadas. Use prévia antes de executar.
 
                 Regras para lançamentos:
                 - Quando o usuário disser que gastou, pagou, comprou ou teve saída de dinheiro, registre como EXPENSE.
@@ -161,6 +173,28 @@ public class FinanceChatService {
                 - Se a mensagem não mencionar data, use a data atual.
                 - Se a mensagem não mencionar conta, deixe a conta vazia para o backend usar/criar a conta padrão.
                 - Infira a melhor categoria com base no texto. Se nenhuma categoria existente servir, informe um nome de categoria simples; o backend cria categoria personalizada.
+
+                Regras para planejamento mensal, contas fixas/variáveis e baixas:
+                - Quando o usuário falar "conta fixa", "despesa fixa", "renda fixa", "variável", "planejamento", "virada do mês", "baixa", "paguei a conta planejada", "cartão de crédito", "compra no cartão", "parcelado" ou "associe esta transação", use getMonthlyPlanningContext antes de executar.
+                - Contas/rendas planejadas são itens do ciclo mensal; criá-las NÃO deve criar transação real nem alterar saldo. Use CREATE_MONTHLY_PLAN_ITEM.
+                - Dar baixa em uma conta/renda planejada deve usar PAY_MONTHLY_PLAN_ITEM, não REGISTER_TRANSACTION, salvo quando o usuário explicitamente pedir um lançamento avulso.
+                - Se já existir uma transação real para a despesa/receita, prefira LINK_TRANSACTION_TO_MONTHLY_PLAN_ITEM ou PAY_MONTHLY_PLAN_ITEM com preferExistingTransaction=true. Isso evita gasto duplicado no dashboard.
+                - Para frases como "associe a transação X à despesa fixa Y", "essa transação era a conta de luz", "essa despesa já foi lançada", nunca crie nova transação: use LINK_TRANSACTION_TO_MONTHLY_PLAN_ITEM.
+                - Se o usuário disser que uma associação anterior foi feita errada, que uma transação foi registrada/associada erroneamente ou pedir para corrigir a associação, use forceRelink=true.
+                - Se o usuário disser "isso ainda não foi pago", "ainda não recebi", "marque como pendente", "desfaça a baixa" ou "essas transações foram cadastradas por engano", use REOPEN_MONTHLY_PLAN_ITEM. Use deleteLinkedTransactions=true quando o usuário indicar que os lançamentos reais foram erro/importação/modelo e não devem afetar saldo/dashboard; use false quando a transação real deve continuar existindo avulsa.
+                - Para montar planejamento a partir de lançamentos antigos/errados sem dar baixa, use RECONCILE_MONTHLY_PLAN_WITH_TRANSACTIONS com createPlanItemsAsPendingOnly=true. Se o usuário disser para limpar/remover esses lançamentos reais, use deleteSourceTransactionsWhenCreatingPlanItems=true.
+                - Para montar o mês conciliando transações reais já pagas/recebidas, use RECONCILE_MONTHLY_PLAN_WITH_TRANSACTIONS com createPlanItemsAsPendingOnly=false em prévia primeiro. Se o usuário confirmar, execute.
+                - Compras no cartão de crédito NÃO significam pagamento da fatura. Não use PAY_MONTHLY_PLAN_ITEM nem LINK_TRANSACTION_TO_MONTHLY_PLAN_ITEM para compras no cartão, salvo se o usuário disser explicitamente que pagou a fatura.
+                - Para compras no cartão de crédito, registre a transação real como EXPENSE e categoria "Cartão de Crédito", mas trate o planejamento como aumento do valor previsto da fatura/Cartão de Crédito, não como realizado/pago.
+                - Para compras parceladas no cartão, entenda "4x de R$ 100" como 4 parcelas mensais de R$ 100. Use CREATE_INSTALLMENT_MONTHLY_PLAN_ITEMS para somar cada parcela ao item "Cartão de Crédito" no respectivo ciclo. O backend cria ciclos futuros e replica recorrências quando necessário.
+                - Em CREATE_INSTALLMENT_MONTHLY_PLAN_ITEMS, use firstDueDate como o vencimento do item "Cartão de Crédito" no ciclo da primeira parcela quando ele existir no contexto; se não existir, use a melhor data de vencimento inferida.
+                - Ao usar CREATE_INSTALLMENT_MONTHLY_PLAN_ITEMS junto com REGISTER_TRANSACTION para manter histórico, defina skipMonthlyPlanAutoAdjustment=true nos comandos REGISTER_TRANSACTION relacionados para não somar duas vezes o mesmo gasto no planejamento.
+                - Se a compra no cartão não for parcelada, use INCREASE_MONTHLY_PLAN_ITEM_EXPECTED_AMOUNT para somar ao previsto do item "Cartão de Crédito", sem baixa.
+                - Transações diárias registradas pelo chat podem ser associadas automaticamente pelo backend a um item variável compatível do ciclo, como "Mercado" ou "Combustível". Compras de cartão são exceção: elas devem aumentar o previsto da fatura, não o realizado.
+                - Natureza: FIXED para internet, aluguel, prestação, seguro, assinatura, consórcio, financiamento, salário; VARIABLE para cartão de crédito, água, luz, mercado, combustível, bônus, freelances e gastos que mudam.
+                - Recorrência com data máxima: quando o usuário disser "até", "última parcela em", "por X meses" ou indicar término, preencha recurrenceEndDate. Depois desta data, o backend não replica o item para ciclos futuros.
+                - Recorrente: true para obrigações/receitas que devem voltar no próximo ciclo; false para eventos pontuais.
+                - Se o usuário disser "não crie novas transações", use somente associação/reconciliação com transações existentes.
 
                 Regras para categorias:
                 - Se o usuário usar a palavra "tipo" com nomes livres como "outro", "cartão de crédito", "mercado" ou "alimentação", interprete como categoria, não como TransactionType.
@@ -186,6 +220,9 @@ public class FinanceChatService {
                 - Responda objetivamente, mas explique quando uma ação foi pré-visualizada em vez de executada.
                 - Quando uma prévia exigir confirmação, diga claramente o que será alterado e peça confirmação.
                 - Depois de executar comandos, resuma quantidade, valor, data, conta/categoria/cofrinho e diferenças aplicadas.
+                - Para baixas do planejamento mensal, informe se uma transação existente foi associada ou se uma nova transação foi criada.
+                - Para desfazer baixa, informe se as transações vinculadas foram excluídas ou mantidas como avulsas.
+                - Para reconciliação mensal, informe quantas transações foram analisadas, associadas, criaram itens e quantas ficaram ambíguas.
                 - Para reconciliação de saldo dos cofrinhos, informe saldo anterior, saldo real, ajuste aplicado e rendimento apurado do período quando disponível.
                 - Se faltar informação essencial e você não conseguir inferir com segurança, faça uma pergunta curta.
 

@@ -16,6 +16,10 @@ public record FinancialTransactionCreateRequest(
 
         Long categoryId,
 
+        Long financialPeriodId,
+
+        Long monthlyPlanItemId,
+
         @NotNull(message = "O tipo do lançamento é obrigatório.")
         TransactionType type,
 

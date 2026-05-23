@@ -10,6 +10,9 @@ import jakarta.validation.constraints.Size;
 public record FinancialTransactionUpdateRequest(
         Long accountId,
         Long categoryId,
+        Long financialPeriodId,
+        Long monthlyPlanItemId,
+        Boolean clearMonthlyPlanItem,
         TransactionType type,
         @Size(max = 255, message = "A descrição deve ter no máximo 255 caracteres.")
         String description,

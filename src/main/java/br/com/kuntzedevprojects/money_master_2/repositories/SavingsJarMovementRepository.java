@@ -7,6 +7,7 @@ import java.util.Optional;
 import java.util.Set;
 
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -16,6 +17,13 @@ import br.com.kuntzedevprojects.money_master_2.enums.SavingsJarMovementType;
 public interface SavingsJarMovementRepository extends JpaRepository<SavingsJarMovement, Long> {
 
     List<SavingsJarMovement> findBySavingsJarIdOrderByOccurredOnDescIdDesc(Long savingsJarId);
+
+    @Modifying
+    @Query("""
+            delete from SavingsJarMovement m
+            where m.savingsJar.id = :savingsJarId
+            """)
+    int deleteBySavingsJarId(@Param("savingsJarId") Long savingsJarId);
 
     @Query("""
             select coalesce(sum(

@@ -2,7 +2,7 @@ package br.com.kuntzedevprojects.money_master_2.config.properties;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
-@ConfigurationProperties(prefix = "app.email")
+@ConfigurationProperties(prefix = "money-master.email")
 public class MoneyMasterEmailProperties {
 
     private String from = "no-reply@moneymaster.local";

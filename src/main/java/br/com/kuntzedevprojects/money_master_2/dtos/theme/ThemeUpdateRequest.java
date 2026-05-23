@@ -6,6 +6,7 @@ import jakarta.validation.constraints.Size;
 public record ThemeUpdateRequest(
         @NotBlank @Size(max = 120) String appName,
         @Size(max = 500) String logoUrl,
+        @Size(max = 500) String faviconUrl,
         @NotBlank @Size(max = 20) String primaryColor,
         @NotBlank @Size(max = 20) String secondaryColor,
         @NotBlank @Size(max = 20) String accentColor,

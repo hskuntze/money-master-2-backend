@@ -3,6 +3,7 @@ package br.com.kuntzedevprojects.money_master_2.tools;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
+import java.time.Instant;
 
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
@@ -18,6 +19,11 @@ import br.com.kuntzedevprojects.money_master_2.dtos.finance.AccountBalanceRespon
 import br.com.kuntzedevprojects.money_master_2.dtos.finance.AccountResponse;
 import br.com.kuntzedevprojects.money_master_2.dtos.finance.CategoryResponse;
 import br.com.kuntzedevprojects.money_master_2.dtos.finance.FinancialSummaryResponse;
+import br.com.kuntzedevprojects.money_master_2.dtos.finance.FinancialPeriodResponse;
+import br.com.kuntzedevprojects.money_master_2.dtos.finance.FinancialTransactionResponse;
+import br.com.kuntzedevprojects.money_master_2.dtos.finance.MonthlyPeriodSummaryResponse;
+import br.com.kuntzedevprojects.money_master_2.dtos.finance.MonthlyPlanItemResponse;
+import br.com.kuntzedevprojects.money_master_2.dtos.finance.MonthlyPlanningContextResponse;
 import br.com.kuntzedevprojects.money_master_2.dtos.savingsjar.SavingsJarResponse;
 import br.com.kuntzedevprojects.money_master_2.dtos.savingsjar.SavingsJarSummaryResponse;
 import br.com.kuntzedevprojects.money_master_2.enums.TransactionType;
@@ -26,6 +32,8 @@ import br.com.kuntzedevprojects.money_master_2.services.CategoryService;
 import br.com.kuntzedevprojects.money_master_2.services.CurrentUserService;
 import br.com.kuntzedevprojects.money_master_2.services.FinanceCommandExecutor;
 import br.com.kuntzedevprojects.money_master_2.services.FinancialReportService;
+import br.com.kuntzedevprojects.money_master_2.services.FinancialPeriodService;
+import br.com.kuntzedevprojects.money_master_2.services.MonthlyPlanReconciliationService;
 import br.com.kuntzedevprojects.money_master_2.services.FinancialTransactionService;
 import br.com.kuntzedevprojects.money_master_2.services.SavingsJarService;
 
@@ -39,6 +47,8 @@ public class FinanceAiTools {
     private final FinancialReportService reportService;
     private final SavingsJarService savingsJarService;
     private final FinanceCommandExecutor commandExecutor;
+    private final FinancialPeriodService financialPeriodService;
+    private final MonthlyPlanReconciliationService reconciliationService;
 
     public FinanceAiTools(
             CurrentUserService currentUserService,
@@ -47,7 +57,9 @@ public class FinanceAiTools {
             FinancialTransactionService transactionService,
             FinancialReportService reportService,
             SavingsJarService savingsJarService,
-            FinanceCommandExecutor commandExecutor
+            FinanceCommandExecutor commandExecutor,
+            FinancialPeriodService financialPeriodService,
+            MonthlyPlanReconciliationService reconciliationService
     ) {
         this.currentUserService = currentUserService;
         this.accountService = accountService;
@@ -56,6 +68,8 @@ public class FinanceAiTools {
         this.reportService = reportService;
         this.savingsJarService = savingsJarService;
         this.commandExecutor = commandExecutor;
+        this.financialPeriodService = financialPeriodService;
+        this.reconciliationService = reconciliationService;
     }
 
 
@@ -66,6 +80,23 @@ public class FinanceAiTools {
             @ToolParam(description = "true para incluir até 50 transações recentes do período ou dos últimos 30 dias.") Boolean includeRecentTransactions
     ) {
         return commandExecutor.getContext(currentUserService.currentEmail(), from, to, includeRecentTransactions);
+    }
+
+    @Tool(description = "Obtém o contexto da Virada do mês: ciclos financeiros, ciclo selecionado, resumo, contas/rendas planejadas e transações ainda não associadas a item mensal. Use antes de dar baixa, associar transações existentes ou reconciliar despesas fixas/variáveis.")
+    public MonthlyPlanningContextResponse getMonthlyPlanningContext(
+            @ToolParam(description = "ID do ciclo financeiro. Pode ficar vazio para usar o ciclo atual/da data de referência.") String periodId,
+            @ToolParam(description = "Data de referência yyyy-MM-dd. Usada quando periodId estiver vazio. Pode ficar vazio para hoje.") String referenceDate,
+            @ToolParam(description = "true para incluir transações do ciclo que ainda não estão associadas a item mensal.") Boolean includeUnlinkedTransactions
+    ) {
+        String ownerEmail = currentUserService.currentEmail();
+        FinancialPeriodResponse selectedPeriod = resolvePeriodForTool(ownerEmail, periodId, referenceDate);
+        List<FinancialPeriodResponse> periods = financialPeriodService.list(ownerEmail);
+        MonthlyPeriodSummaryResponse summary = financialPeriodService.summary(ownerEmail, selectedPeriod.id());
+        List<MonthlyPlanItemResponse> items = financialPeriodService.listPlanItems(ownerEmail, selectedPeriod.id(), null);
+        List<FinancialTransactionResponse> unlinkedTransactions = Boolean.TRUE.equals(includeUnlinkedTransactions)
+                ? reconciliationService.listUnlinkedTransactions(ownerEmail, selectedPeriod.id(), null)
+                : List.of();
+        return new MonthlyPlanningContextResponse(selectedPeriod, periods, summary, items, unlinkedTransactions, Instant.now());
     }
 
     @Tool(description = "Gera uma prévia de comandos financeiros estruturados sem alterar o banco. Use para operações em lote, alterações potencialmente ambíguas ou quando quiser validar antes de executar. O usuário pode confirmar no próximo turno.")
@@ -235,6 +266,17 @@ public class FinanceAiTools {
                 type,
                 originalMessage
         );
+    }
+
+
+    private FinancialPeriodResponse resolvePeriodForTool(String ownerEmail, String periodIdText, String referenceDateText) {
+        if (periodIdText != null && !periodIdText.isBlank()) {
+            return financialPeriodService.get(ownerEmail, Long.valueOf(periodIdText.trim()));
+        }
+        LocalDate referenceDate = referenceDateText == null || referenceDateText.isBlank()
+                ? LocalDate.now()
+                : LocalDate.parse(referenceDateText.trim());
+        return FinancialPeriodResponse.from(financialPeriodService.findOrCreateForDate(ownerEmail, referenceDate));
     }
 
     private TransactionType parseTransactionTypeOrNull(String type) {

@@ -228,9 +228,10 @@ public class SavingsJarService {
     }
 
     @Transactional
-    public void deactivate(String ownerEmail, Long id) {
+    public void delete(String ownerEmail, Long id) {
         SavingsJar jar = findOwnedJar(ownerEmail, id);
-        jar.setActive(false);
+        movementRepository.deleteBySavingsJarId(jar.getId());
+        savingsJarRepository.delete(jar);
     }
 
     @Transactional
@@ -293,11 +294,21 @@ public class SavingsJarService {
 
         BigDecimal previousYieldAmount = yieldService.totalYield(jar.getId(), occurredOn).setScale(2, RoundingMode.HALF_UP);
         BigDecimal adjustmentAmount = realYieldAmount.subtract(previousYieldAmount).setScale(2, RoundingMode.HALF_UP);
+        BigDecimal currentAmountBeforeAdjustment = yieldService.currentAmount(jar.getId(), null);
         if (adjustmentAmount.signum() == 0) {
-            throw new BusinessException("O rendimento informado já é igual ao rendimento registrado para esta data.");
+            return new SavingsJarYieldCorrectionResponse(
+                    jar.getId(),
+                    jar.getName(),
+                    occurredOn,
+                    previousYieldAmount,
+                    realYieldAmount,
+                    adjustmentAmount,
+                    currentAmountBeforeAdjustment,
+                    null,
+                    "Nenhuma correção foi necessária. O rendimento informado já é igual ao rendimento registrado para esta data."
+            );
         }
 
-        BigDecimal currentAmountBeforeAdjustment = yieldService.currentAmount(jar.getId(), null);
         if (currentAmountBeforeAdjustment.add(adjustmentAmount).signum() < 0) {
             throw new BusinessException("A correção de rendimento deixaria o saldo atual do cofrinho negativo.");
         }
@@ -349,17 +360,16 @@ public class SavingsJarService {
     @Transactional
     public SavingsJarApplyYieldResponse applyPendingYield(String ownerEmail, Long id, LocalDate to) {
         SavingsJar jar = findOwnedJar(ownerEmail, id);
-        return yieldService.applyPendingYields(jar, to == null ? today() : to);
+        return yieldService.applyPendingYields(jar, to);
     }
 
     @Transactional
     public List<SavingsJarApplyYieldResponse> applyPendingYieldsForUser(String ownerEmail, LocalDate to) {
-        LocalDate target = to == null ? today() : to;
         return savingsJarRepository.findByOwnerEmailWithAccount(ownerEmail)
                 .stream()
                 .filter(SavingsJar::isActive)
                 .filter(SavingsJar::isYieldEnabled)
-                .map(jar -> yieldService.applyPendingYields(jar, target))
+                .map(jar -> yieldService.applyPendingYields(jar, to))
                 .toList();
     }
 
@@ -461,7 +471,9 @@ public class SavingsJarService {
         );
         SavingsJarYieldCorrectionResponse correction = correctYield(ownerEmail, jar.getId(), request, TransactionSource.AI_CHAT);
         BigDecimal difference = correction.adjustmentAmount();
-        String message = "Rendimento real reconciliado com sucesso. Diferença aplicada: " + difference + ".";
+        String message = difference.signum() == 0
+                ? correction.message()
+                : "Rendimento real reconciliado com sucesso. Diferença aplicada: " + difference + ".";
         return toToolResponse(toResponse(jar), message);
     }
 

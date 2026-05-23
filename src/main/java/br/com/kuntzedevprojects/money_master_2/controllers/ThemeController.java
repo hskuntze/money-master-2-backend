@@ -24,6 +24,7 @@ public class ThemeController {
     }
 
     @GetMapping("/active")
+    @PreAuthorize("permitAll()")
     public ResponseEntity<ThemeResponse> getActiveTheme() {
         return ResponseEntity.ok(themeService.getActiveTheme());
     }

@@ -2,8 +2,8 @@ package br.com.kuntzedevprojects.money_master_2.services;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
-import java.time.DayOfWeek;
 import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -12,6 +12,7 @@ import java.util.Set;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import br.com.kuntzedevprojects.money_master_2.config.properties.SavingsJarYieldProperties;
 import br.com.kuntzedevprojects.money_master_2.dtos.savingsjar.SavingsJarApplyYieldResponse;
 import br.com.kuntzedevprojects.money_master_2.dtos.savingsjar.SavingsJarYieldPreviewResponse;
 import br.com.kuntzedevprojects.money_master_2.entities.SavingsJar;
@@ -28,15 +29,21 @@ public class SavingsJarYieldService {
     private final SavingsJarRepository savingsJarRepository;
     private final SavingsJarMovementRepository movementRepository;
     private final BcbSgsService bcbSgsService;
+    private final SavingsJarYieldProperties yieldProperties;
+    private final BrazilianBusinessDayService businessDayService;
 
     public SavingsJarYieldService(
             SavingsJarRepository savingsJarRepository,
             SavingsJarMovementRepository movementRepository,
-            BcbSgsService bcbSgsService
+            BcbSgsService bcbSgsService,
+            SavingsJarYieldProperties yieldProperties,
+            BrazilianBusinessDayService businessDayService
     ) {
         this.savingsJarRepository = savingsJarRepository;
         this.movementRepository = movementRepository;
         this.bcbSgsService = bcbSgsService;
+        this.yieldProperties = yieldProperties;
+        this.businessDayService = businessDayService;
     }
 
     @Transactional
@@ -49,7 +56,7 @@ public class SavingsJarYieldService {
 
     @Transactional
     public SavingsJarApplyYieldResponse applyPendingYields(SavingsJar jar, LocalDate to) {
-        LocalDate targetDate = to == null ? LocalDate.now() : to;
+        LocalDate targetDate = resolveTargetDate(jar, to);
 
         if (!canCalculateAutomatically(jar)) {
             BigDecimal currentAmount = currentAmount(jar.getId(), null);
@@ -93,7 +100,7 @@ public class SavingsJarYieldService {
         boolean skippedByMissingBaseAmount = false;
 
         for (LocalDate calculationDate = from; !calculationDate.isAfter(targetDate); calculationDate = calculationDate.plusDays(1)) {
-            if (jar.isBusinessDaysOnly() && isWeekend(calculationDate)) {
+            if (!businessDayService.isEligibleYieldDate(calculationDate, jar.isBusinessDaysOnly(), jar.isUseBrazilianHolidays())) {
                 continue;
             }
 
@@ -174,7 +181,7 @@ public class SavingsJarYieldService {
                     "Cofrinho sem cálculo automático de rendimento."
             );
         }
-        if (jar.isBusinessDaysOnly() && isWeekend(reference)) {
+        if (!businessDayService.isEligibleYieldDate(reference, jar.isBusinessDaysOnly(), jar.isUseBrazilianHolidays())) {
             return new SavingsJarYieldPreviewResponse(
                     reference,
                     currentAmount(jar.getId(), null),
@@ -232,6 +239,14 @@ public class SavingsJarYieldService {
                 && jar.getYieldCalculationType() == SavingsJarYieldCalculationType.CDI_PERCENTAGE
                 && jar.getYieldPercentage() != null
                 && jar.getYieldPercentage().signum() > 0;
+    }
+
+    private LocalDate resolveTargetDate(SavingsJar jar, LocalDate to) {
+        if (to != null) {
+            return to;
+        }
+        LocalDate today = LocalDate.now(ZoneId.of(yieldProperties.getZoneId()));
+        return businessDayService.previousEligibleDate(today, jar.isBusinessDaysOnly(), jar.isUseBrazilianHolidays());
     }
 
     private LocalDate nextCalculationDate(SavingsJar jar) {
@@ -344,7 +359,4 @@ public class SavingsJarYieldService {
                 .multiply(percentageOfCdi.divide(BigDecimal.valueOf(100), 12, RoundingMode.HALF_UP));
     }
 
-    private boolean isWeekend(LocalDate date) {
-        return date.getDayOfWeek() == DayOfWeek.SATURDAY || date.getDayOfWeek() == DayOfWeek.SUNDAY;
-    }
 }

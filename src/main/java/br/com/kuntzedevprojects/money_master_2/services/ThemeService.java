@@ -28,6 +28,7 @@ public class ThemeService {
         Theme theme = findActiveTheme();
         theme.setAppName(request.appName());
         theme.setLogoUrl(request.logoUrl());
+        theme.setFaviconUrl(request.faviconUrl());
         theme.setPrimaryColor(request.primaryColor());
         theme.setSecondaryColor(request.secondaryColor());
         theme.setAccentColor(request.accentColor());

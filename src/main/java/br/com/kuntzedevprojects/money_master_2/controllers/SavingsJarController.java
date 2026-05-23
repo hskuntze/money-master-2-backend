@@ -80,9 +80,9 @@ public class SavingsJarController {
 
     @DeleteMapping("/{id}")
     @PreAuthorize("hasAuthority('FINANCE_MANAGE')")
-    public ResponseEntity<MessageResponse> deactivate(@PathVariable Long id, Principal principal) {
-        savingsJarService.deactivate(principal.getName(), id);
-        return ResponseEntity.ok(new MessageResponse("Cofrinho desativado com sucesso."));
+    public ResponseEntity<MessageResponse> delete(@PathVariable Long id, Principal principal) {
+        savingsJarService.delete(principal.getName(), id);
+        return ResponseEntity.ok(new MessageResponse("Cofrinho excluído com sucesso."));
     }
 
     @GetMapping("/{id}/movements")

@@ -2,7 +2,11 @@ package br.com.kuntzedevprojects.money_master_2.services;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
+import java.util.Set;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -15,32 +19,46 @@ import br.com.kuntzedevprojects.money_master_2.dtos.finance.FinancialTransaction
 import br.com.kuntzedevprojects.money_master_2.dtos.finance.FinancialTransactionUpdateRequest;
 import br.com.kuntzedevprojects.money_master_2.entities.Account;
 import br.com.kuntzedevprojects.money_master_2.entities.Category;
+import br.com.kuntzedevprojects.money_master_2.entities.FinancialPeriod;
 import br.com.kuntzedevprojects.money_master_2.entities.FinancialTransaction;
+import br.com.kuntzedevprojects.money_master_2.entities.MonthlyPlanItem;
 import br.com.kuntzedevprojects.money_master_2.entities.User;
+import br.com.kuntzedevprojects.money_master_2.enums.MonthlyPlanItemNature;
+import br.com.kuntzedevprojects.money_master_2.enums.MonthlyPlanItemStatus;
 import br.com.kuntzedevprojects.money_master_2.enums.TransactionSource;
 import br.com.kuntzedevprojects.money_master_2.enums.TransactionType;
 import br.com.kuntzedevprojects.money_master_2.exceptions.BusinessException;
 import br.com.kuntzedevprojects.money_master_2.exceptions.ResourceNotFoundException;
 import br.com.kuntzedevprojects.money_master_2.repositories.FinancialTransactionRepository;
+import br.com.kuntzedevprojects.money_master_2.repositories.MonthlyPlanItemRepository;
 
 @Service
 public class FinancialTransactionService {
 
+    private static final int AUTO_ATTACH_VARIABLE_SCORE = 50;
+    private static final int AUTO_ATTACH_FIXED_SCORE = 75;
+
     private final FinancialTransactionRepository transactionRepository;
+    private final MonthlyPlanItemRepository planItemRepository;
     private final CurrentUserService currentUserService;
     private final AccountService accountService;
     private final CategoryService categoryService;
+    private final FinancialPeriodService financialPeriodService;
 
     public FinancialTransactionService(
             FinancialTransactionRepository transactionRepository,
+            MonthlyPlanItemRepository planItemRepository,
             CurrentUserService currentUserService,
             AccountService accountService,
-            CategoryService categoryService
+            CategoryService categoryService,
+            FinancialPeriodService financialPeriodService
     ) {
         this.transactionRepository = transactionRepository;
+        this.planItemRepository = planItemRepository;
         this.currentUserService = currentUserService;
         this.accountService = accountService;
         this.categoryService = categoryService;
+        this.financialPeriodService = financialPeriodService;
     }
 
     @Transactional(readOnly = true)
@@ -50,10 +68,12 @@ public class FinancialTransactionService {
             LocalDate to,
             Long accountId,
             Long categoryId,
-            TransactionType type
+            TransactionType type,
+            Long periodId,
+            Long planItemId
     ) {
         validatePeriod(from, to);
-        return transactionRepository.search(ownerEmail, from, to, accountId, categoryId, type)
+        return transactionRepository.search(ownerEmail, from, to, accountId, categoryId, type, periodId, planItemId)
                 .stream()
                 .map(FinancialTransactionResponse::from)
                 .toList();
@@ -69,13 +89,30 @@ public class FinancialTransactionService {
         User owner = currentUserService.findUserByEmail(ownerEmail);
         Account account = accountService.findOwnedAccount(ownerEmail, request.accountId());
         Category category = request.categoryId() == null ? null : categoryService.findAvailableCategory(ownerEmail, request.categoryId());
+        FinancialPeriod period = request.financialPeriodId() == null
+                ? financialPeriodService.findOrCreateForDate(ownerEmail, request.occurredOn())
+                : financialPeriodService.findOwnedPeriod(ownerEmail, request.financialPeriodId());
+        MonthlyPlanItem planItem = request.monthlyPlanItemId() == null
+                ? null
+                : financialPeriodService.findOwnedPlanItem(ownerEmail, request.monthlyPlanItemId());
 
+        if (planItem != null) {
+            period = planItem.getFinancialPeriod();
+            if (category == null) {
+                category = planItem.getCategory();
+            }
+            if (planItem.getType() != request.type()) {
+                throw new BusinessException("O tipo do lançamento precisa ser igual ao tipo do item planejado.");
+            }
+        }
         validateCategoryType(category, request.type());
 
         FinancialTransaction transaction = new FinancialTransaction();
         transaction.setOwner(owner);
         transaction.setAccount(account);
         transaction.setCategory(category);
+        transaction.setFinancialPeriod(period);
+        transaction.setMonthlyPlanItem(planItem);
         transaction.setType(request.type());
         transaction.setDescription(normalizeRequired(request.description(), "A descrição é obrigatória."));
         transaction.setAmount(normalizeAmount(request.amount()));
@@ -83,12 +120,18 @@ public class FinancialTransactionService {
         transaction.setSource(request.source() == null ? TransactionSource.MANUAL : request.source());
         transaction.setNotes(normalizeNullable(request.notes()));
 
-        return FinancialTransactionResponse.from(transactionRepository.save(transaction));
+        FinancialTransaction saved = transactionRepository.save(transaction);
+        if (planItem == null) {
+            autoAttachToMonthlyPlanItem(ownerEmail, saved);
+        }
+        financialPeriodService.registerPaymentForPlanItem(saved.getMonthlyPlanItem(), saved);
+        return FinancialTransactionResponse.from(saved);
     }
 
     @Transactional
     public FinancialTransactionResponse update(String ownerEmail, Long id, FinancialTransactionUpdateRequest request) {
         FinancialTransaction transaction = findOwnedTransaction(ownerEmail, id);
+        MonthlyPlanItem previousPlanItem = transaction.getMonthlyPlanItem();
 
         if (request.accountId() != null) {
             transaction.setAccount(accountService.findOwnedAccount(ownerEmail, request.accountId()));
@@ -98,8 +141,28 @@ public class FinancialTransactionService {
             validateCategoryType(category, request.type() == null ? transaction.getType() : request.type());
             transaction.setCategory(category);
         }
+        if (request.financialPeriodId() != null) {
+            transaction.setFinancialPeriod(financialPeriodService.findOwnedPeriod(ownerEmail, request.financialPeriodId()));
+        }
+        if (Boolean.TRUE.equals(request.clearMonthlyPlanItem())) {
+            transaction.setMonthlyPlanItem(null);
+        } else if (request.monthlyPlanItemId() != null) {
+            MonthlyPlanItem planItem = financialPeriodService.findOwnedPlanItem(ownerEmail, request.monthlyPlanItemId());
+            TransactionType targetType = request.type() == null ? transaction.getType() : request.type();
+            if (planItem.getType() != targetType) {
+                throw new BusinessException("O tipo do lançamento precisa ser igual ao tipo do item planejado.");
+            }
+            if (transaction.getCategory() == null && planItem.getCategory() != null) {
+                transaction.setCategory(planItem.getCategory());
+            }
+            transaction.setMonthlyPlanItem(planItem);
+            transaction.setFinancialPeriod(planItem.getFinancialPeriod());
+        }
         if (request.type() != null) {
             validateCategoryType(transaction.getCategory(), request.type());
+            if (transaction.getMonthlyPlanItem() != null && transaction.getMonthlyPlanItem().getType() != request.type()) {
+                throw new BusinessException("O tipo do lançamento precisa ser igual ao tipo do item planejado.");
+            }
             transaction.setType(request.type());
         }
         if (request.description() != null && !request.description().isBlank()) {
@@ -115,13 +178,22 @@ public class FinancialTransactionService {
             transaction.setNotes(normalizeNullable(request.notes()));
         }
 
+        MonthlyPlanItem currentPlanItem = transaction.getMonthlyPlanItem();
+        financialPeriodService.synchronizePlanItemPayment(currentPlanItem);
+        if (previousPlanItem != null && (currentPlanItem == null || !previousPlanItem.getId().equals(currentPlanItem.getId()))) {
+            financialPeriodService.synchronizePlanItemPayment(previousPlanItem);
+        }
+
         return FinancialTransactionResponse.from(transaction);
     }
 
     @Transactional
     public void delete(String ownerEmail, Long id) {
         FinancialTransaction transaction = findOwnedTransaction(ownerEmail, id);
+        MonthlyPlanItem planItem = transaction.getMonthlyPlanItem();
         transactionRepository.delete(transaction);
+        transactionRepository.flush();
+        financialPeriodService.synchronizePlanItemPayment(planItem);
     }
 
     @Transactional
@@ -136,6 +208,22 @@ public class FinancialTransactionService {
             String originalMessage,
             String notes
     ) {
+        return registerFromAi(ownerEmail, typeText, amount, description, occurredOnText, accountName, categoryName, originalMessage, notes, false);
+    }
+
+    @Transactional
+    public ToolTransactionResponse registerFromAi(
+            String ownerEmail,
+            String typeText,
+            BigDecimal amount,
+            String description,
+            String occurredOnText,
+            String accountName,
+            String categoryName,
+            String originalMessage,
+            String notes,
+            Boolean skipMonthlyPlanAutoAdjustment
+    ) {
         User owner = currentUserService.findUserByEmail(ownerEmail);
         TransactionType type = parseTransactionType(typeText);
         LocalDate occurredOn = parseDateOrToday(occurredOnText);
@@ -146,6 +234,7 @@ public class FinancialTransactionService {
         transaction.setOwner(owner);
         transaction.setAccount(account);
         transaction.setCategory(category);
+        transaction.setFinancialPeriod(financialPeriodService.findOrCreateForDate(ownerEmail, occurredOn));
         transaction.setType(type);
         transaction.setDescription(normalizeRequired(description, "A descrição é obrigatória."));
         transaction.setAmount(normalizeAmount(amount));
@@ -155,6 +244,9 @@ public class FinancialTransactionService {
         transaction.setNotes(normalizeNullable(notes));
 
         FinancialTransaction saved = transactionRepository.save(transaction);
+        if (!Boolean.TRUE.equals(skipMonthlyPlanAutoAdjustment)) {
+            autoAttachToMonthlyPlanItem(ownerEmail, saved);
+        }
         AccountBalanceResponse balance = accountService.balance(ownerEmail, account.getId());
 
         return new ToolTransactionResponse(
@@ -268,6 +360,174 @@ public class FinancialTransactionService {
                 .orElseThrow(() -> new ResourceNotFoundException("Lançamento financeiro não encontrado."));
     }
 
+    private void autoAttachToMonthlyPlanItem(String ownerEmail, FinancialTransaction transaction) {
+        if (transaction.getMonthlyPlanItem() != null || transaction.getFinancialPeriod() == null) {
+            return;
+        }
+        List<MonthlyPlanItem> candidates = planItemRepository.findActiveCandidatesByOwnerEmailAndPeriod(
+                ownerEmail,
+                transaction.getFinancialPeriod().getId(),
+                transaction.getType()
+        );
+        if (isCreditCardPurchase(transaction)) {
+            MonthlyPlanItem cardItem = candidates.stream()
+                    .filter(this::isCreditCardPlanItem)
+                    .findFirst()
+                    .orElse(null);
+            financialPeriodService.increaseMonthlyPlanItemExpectedAmountFromAi(
+                    ownerEmail,
+                    transaction.getType().name(),
+                    cardItem == null ? "Cartão de Crédito" : cardItem.getDescription(),
+                    transaction.getAmount(),
+                    cardItem == null ? transaction.getOccurredOn().toString() : cardItem.getDueDate().toString(),
+                    transaction.getAccount() == null ? null : transaction.getAccount().getName(),
+                    transaction.getCategory() == null ? "Cartão de Crédito" : transaction.getCategory().getName(),
+                    MonthlyPlanItemNature.VARIABLE.name(),
+                    false,
+                    null,
+                    "Compra no cartão lançada como transação avulsa. Valor somado ao previsto, sem baixa automática."
+            );
+            return;
+        }
+
+        candidates.stream()
+                .map(item -> new PlanItemMatch(item, autoAttachScore(transaction, item)))
+                .filter(match -> match.score() >= minimumAutoAttachScore(match.item()))
+                .max(Comparator.comparingInt(PlanItemMatch::score))
+                .map(PlanItemMatch::item)
+                .ifPresent(item -> {
+                    transaction.setMonthlyPlanItem(item);
+                    if (transaction.getCategory() == null && item.getCategory() != null) {
+                        transaction.setCategory(item.getCategory());
+                    }
+                    financialPeriodService.synchronizePlanItemPayment(item);
+                });
+    }
+
+    private boolean isCreditCardPurchase(FinancialTransaction transaction) {
+        if (transaction.getType() != TransactionType.EXPENSE) {
+            return false;
+        }
+        String categoryName = transaction.getCategory() == null ? "" : transaction.getCategory().getName();
+        String accountType = transaction.getAccount() == null || transaction.getAccount().getType() == null ? "" : transaction.getAccount().getType().name();
+        return containsCreditCardText(categoryName) || "CREDIT_CARD".equals(accountType);
+    }
+
+    private boolean isCreditCardPlanItem(MonthlyPlanItem item) {
+        String description = item.getDescription();
+        String categoryName = item.getCategory() == null ? "" : item.getCategory().getName();
+        return item.getType() == TransactionType.EXPENSE
+                && item.getNature() == MonthlyPlanItemNature.VARIABLE
+                && (containsCreditCardText(description) || containsCreditCardText(categoryName));
+    }
+
+    private boolean containsCreditCardText(String value) {
+        String normalized = normalizeComparable(value);
+        return normalized.contains("cartao credito") || normalized.contains("cartao de credito") || normalized.contains("fatura cartao");
+    }
+
+    private int minimumAutoAttachScore(MonthlyPlanItem item) {
+        if (item.getNature() == MonthlyPlanItemNature.VARIABLE) {
+            return AUTO_ATTACH_VARIABLE_SCORE;
+        }
+        return AUTO_ATTACH_FIXED_SCORE;
+    }
+
+    private int autoAttachScore(FinancialTransaction transaction, MonthlyPlanItem item) {
+        if (item.getStatus() == MonthlyPlanItemStatus.CANCELED || item.getType() != transaction.getType()) {
+            return 0;
+        }
+        int score = 0;
+        score += descriptionScore(transaction.getDescription(), item.getDescription());
+        if (item.getNature() == MonthlyPlanItemNature.FIXED) {
+            score += amountScore(transaction.getAmount(), item.getExpectedAmount());
+        } else {
+            score += 10;
+        }
+        if (transaction.getCategory() != null && item.getCategory() != null && transaction.getCategory().getId().equals(item.getCategory().getId())) {
+            score += item.getNature() == MonthlyPlanItemNature.VARIABLE ? 45 : 20;
+        }
+        if (transaction.getAccount() != null && item.getAccount() != null && transaction.getAccount().getId().equals(item.getAccount().getId())) {
+            score += 8;
+        }
+        if (transaction.getOccurredOn() != null && item.getDueDate() != null) {
+            long days = Math.abs(java.time.temporal.ChronoUnit.DAYS.between(transaction.getOccurredOn(), item.getDueDate()));
+            if (days == 0) {
+                score += 10;
+            } else if (days <= 7) {
+                score += 5;
+            }
+        }
+        return Math.min(score, 100);
+    }
+
+    private int descriptionScore(String left, String right) {
+        String a = normalizeComparable(left);
+        String b = normalizeComparable(right);
+        if (a.isBlank() || b.isBlank()) {
+            return 0;
+        }
+        if (a.equals(b)) {
+            return 35;
+        }
+        if (a.contains(b) || b.contains(a)) {
+            return 28;
+        }
+        Set<String> leftTokens = tokens(a);
+        Set<String> rightTokens = tokens(b);
+        if (leftTokens.isEmpty() || rightTokens.isEmpty()) {
+            return 0;
+        }
+        long intersection = leftTokens.stream().filter(rightTokens::contains).count();
+        if (intersection >= 2) {
+            return 20;
+        }
+        if (intersection == 1) {
+            return 10;
+        }
+        return 0;
+    }
+
+    private int amountScore(BigDecimal left, BigDecimal right) {
+        if (left == null || right == null || left.signum() <= 0 || right.signum() <= 0) {
+            return 0;
+        }
+        BigDecimal diff = left.abs().subtract(right.abs()).abs();
+        if (diff.compareTo(new BigDecimal("0.01")) <= 0) {
+            return 30;
+        }
+        if (diff.compareTo(new BigDecimal("5.00")) <= 0) {
+            return 22;
+        }
+        BigDecimal pct = diff.divide(right.abs(), 6, java.math.RoundingMode.HALF_UP);
+        if (pct.compareTo(new BigDecimal("0.05")) <= 0) {
+            return 15;
+        }
+        return 0;
+    }
+
+    private String normalizeComparable(String value) {
+        if (value == null) {
+            return "";
+        }
+        String normalized = java.text.Normalizer.normalize(value, java.text.Normalizer.Form.NFD)
+                .replaceAll("\\p{M}", "")
+                .toLowerCase(Locale.ROOT)
+                .replaceAll("[^a-z0-9]+", " ")
+                .trim();
+        return normalized.replaceAll("\\s+", " ");
+    }
+
+    private Set<String> tokens(String value) {
+        Set<String> tokens = new HashSet<>();
+        for (String token : value.split("\\s+")) {
+            if (token.length() >= 3) {
+                tokens.add(token);
+            }
+        }
+        return tokens;
+    }
+
     private TransactionType parseTransactionType(String typeText) {
         if (typeText == null || typeText.isBlank()) {
             throw new BusinessException("O tipo da transação é obrigatório.");
@@ -338,5 +598,8 @@ public class FinancialTransactionService {
 
     private String normalizeNullable(String value) {
         return value == null || value.isBlank() ? null : value.trim();
+    }
+
+    private record PlanItemMatch(MonthlyPlanItem item, int score) {
     }
 }

@@ -7,6 +7,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -24,6 +26,9 @@ import br.com.kuntzedevprojects.money_master_2.dtos.ai.ToolTransactionResponse;
 import br.com.kuntzedevprojects.money_master_2.dtos.finance.CategoryCreateRequest;
 import br.com.kuntzedevprojects.money_master_2.dtos.finance.CategoryResponse;
 import br.com.kuntzedevprojects.money_master_2.dtos.finance.FinancialTransactionResponse;
+import br.com.kuntzedevprojects.money_master_2.dtos.finance.MonthlyPlanItemResponse;
+import br.com.kuntzedevprojects.money_master_2.dtos.finance.MonthlyPlanReconcileRequest;
+import br.com.kuntzedevprojects.money_master_2.dtos.finance.MonthlyPlanReconcileResponse;
 import br.com.kuntzedevprojects.money_master_2.dtos.savingsjar.SavingsJarBalanceCorrectionResponse;
 import br.com.kuntzedevprojects.money_master_2.entities.AiChatConversation;
 import br.com.kuntzedevprojects.money_master_2.entities.AiCommandAudit;
@@ -31,6 +36,7 @@ import br.com.kuntzedevprojects.money_master_2.entities.FinancialTransaction;
 import br.com.kuntzedevprojects.money_master_2.entities.User;
 import br.com.kuntzedevprojects.money_master_2.enums.AiCommandStatus;
 import br.com.kuntzedevprojects.money_master_2.enums.FinanceCommandType;
+import br.com.kuntzedevprojects.money_master_2.enums.MonthlyPlanItemNature;
 import br.com.kuntzedevprojects.money_master_2.enums.TransactionType;
 import br.com.kuntzedevprojects.money_master_2.exceptions.BusinessException;
 import br.com.kuntzedevprojects.money_master_2.repositories.AiCommandAuditRepository;
@@ -39,12 +45,16 @@ import br.com.kuntzedevprojects.money_master_2.repositories.FinancialTransaction
 @Service
 public class FinanceCommandExecutor {
 
+    private static final Logger logger = LoggerFactory.getLogger(FinanceCommandExecutor.class);
+
     private final CurrentUserService currentUserService;
     private final AccountService accountService;
     private final CategoryService categoryService;
     private final SavingsJarService savingsJarService;
     private final FinancialTransactionService transactionService;
     private final FinancialReportService reportService;
+    private final FinancialPeriodService financialPeriodService;
+    private final MonthlyPlanReconciliationService reconciliationService;
     private final FinancialTransactionRepository transactionRepository;
     private final AiCommandAuditRepository auditRepository;
     private final ObjectMapper objectMapper;
@@ -56,6 +66,8 @@ public class FinanceCommandExecutor {
             SavingsJarService savingsJarService,
             FinancialTransactionService transactionService,
             FinancialReportService reportService,
+            FinancialPeriodService financialPeriodService,
+            MonthlyPlanReconciliationService reconciliationService,
             FinancialTransactionRepository transactionRepository,
             AiCommandAuditRepository auditRepository,
             ObjectMapper objectMapper
@@ -66,6 +78,8 @@ public class FinanceCommandExecutor {
         this.savingsJarService = savingsJarService;
         this.transactionService = transactionService;
         this.reportService = reportService;
+        this.financialPeriodService = financialPeriodService;
+        this.reconciliationService = reconciliationService;
         this.transactionRepository = transactionRepository;
         this.auditRepository = auditRepository;
         this.objectMapper = objectMapper;
@@ -79,7 +93,7 @@ public class FinanceCommandExecutor {
         if (Boolean.TRUE.equals(includeRecentTransactions)) {
             LocalDate effectiveTo = to == null ? LocalDate.now() : to;
             LocalDate effectiveFrom = from == null ? effectiveTo.minusDays(30) : from;
-            transactions = transactionService.search(ownerEmail, effectiveFrom, effectiveTo, null, null, null)
+            transactions = transactionService.search(ownerEmail, effectiveFrom, effectiveTo, null, null, null, null, null)
                     .stream()
                     .limit(50)
                     .toList();
@@ -98,13 +112,11 @@ public class FinanceCommandExecutor {
         );
     }
 
-    @Transactional
     public FinanceCommandBatchResponse preview(String ownerEmail, FinanceCommandBatchRequest request) {
         FinanceCommandBatchRequest previewRequest = new FinanceCommandBatchRequest(true, request == null ? null : request.reason(), request == null ? null : request.commands());
         return process(ownerEmail, previewRequest);
     }
 
-    @Transactional
     public FinanceCommandBatchResponse execute(String ownerEmail, FinanceCommandBatchRequest request) {
         FinanceCommandBatchRequest executeRequest = new FinanceCommandBatchRequest(false, request == null ? null : request.reason(), request == null ? null : request.commands());
         return process(ownerEmail, executeRequest);
@@ -142,10 +154,19 @@ public class FinanceCommandExecutor {
                 case REGISTER_SAVINGS_JAR_YIELD -> registerSavingsJarYield(ownerEmail, command, dryRun);
                 case RECONCILE_SAVINGS_JAR_YIELD -> reconcileSavingsJarYield(ownerEmail, command, dryRun);
                 case RECONCILE_SAVINGS_JAR_BALANCE -> reconcileSavingsJarBalance(ownerEmail, command, dryRun);
+                case CREATE_MONTHLY_PLAN_ITEM -> createMonthlyPlanItem(ownerEmail, command, dryRun);
+                case PAY_MONTHLY_PLAN_ITEM -> payMonthlyPlanItem(ownerEmail, command, dryRun);
+                case REOPEN_MONTHLY_PLAN_ITEM -> reopenMonthlyPlanItem(ownerEmail, command, dryRun);
+                case INCREASE_MONTHLY_PLAN_ITEM_EXPECTED_AMOUNT -> increaseMonthlyPlanItemExpectedAmount(ownerEmail, command, dryRun);
+                case CREATE_INSTALLMENT_MONTHLY_PLAN_ITEMS -> createInstallmentMonthlyPlanItems(ownerEmail, command, dryRun);
+                case LINK_TRANSACTION_TO_MONTHLY_PLAN_ITEM -> linkTransactionToMonthlyPlanItem(ownerEmail, command, dryRun);
+                case RECONCILE_MONTHLY_PLAN_WITH_TRANSACTIONS -> reconcileMonthlyPlan(ownerEmail, command, dryRun);
             };
             saveAudit(ownerEmail, command, result, dryRun, null);
             return result;
         } catch (RuntimeException ex) {
+            logger.warn("Comando financeiro executado pelo chat falhou. ownerEmail={}, type={}, dryRun={}, message={}",
+                    ownerEmail, command.type(), dryRun, ex.getMessage(), ex);
             FinanceCommandResult failed = new FinanceCommandResult(
                     command.type(),
                     AiCommandStatus.FAILED,
@@ -178,7 +199,8 @@ public class FinanceCommandExecutor {
                 command.accountName(),
                 command.categoryName(),
                 originalMessage(command),
-                command.notes()
+                command.notes(),
+                command.skipMonthlyPlanAutoAdjustment()
         );
         return executed(command.type(), response.message(), mapOf("transaction", response));
     }
@@ -308,6 +330,229 @@ public class FinanceCommandExecutor {
                 : executed(command.type(), response.message(), mapOf("balanceCorrection", response));
     }
 
+
+    private FinanceCommandResult createMonthlyPlanItem(String ownerEmail, FinanceCommandItem command, boolean dryRun) {
+        LocalDate dueDate = parseDateOrToday(command.dueDate() == null ? command.occurredOn() : command.dueDate());
+        String safeDescription = planDescription(command);
+        if (dryRun) {
+            return previewed(command.type(), false, "Vou criar um item planejado no controle mensal, sem registrar uma transação real.", mapOf(
+                    "descricao", safeDescription,
+                    "tipo", parseTransactionType(command.transactionType()).name(),
+                    "valorPrevisto", command.amount(),
+                    "vencimento", dueDate,
+                    "natureza", command.planItemNature(),
+                    "recorrente", command.recurring()
+            ));
+        }
+        MonthlyPlanItemResponse response = reconciliationService.createPlanItemFromAi(
+                ownerEmail,
+                command.financialPeriodId(),
+                command.transactionType(),
+                safeDescription,
+                command.amount(),
+                dueDate.toString(),
+                command.accountName(),
+                command.categoryName(),
+                command.planItemNature(),
+                command.recurring(),
+                command.notes()
+        );
+        return executed(command.type(), "Item do planejamento mensal criado com sucesso.", mapOf("monthlyPlanItem", response));
+    }
+
+    private FinanceCommandResult payMonthlyPlanItem(String ownerEmail, FinanceCommandItem command, boolean dryRun) {
+        LocalDate occurredOn = parseDateOrToday(command.occurredOn() == null ? command.dueDate() : command.occurredOn());
+        if (dryRun) {
+            return previewed(command.type(), true, "Vou dar baixa em uma conta/renda planejada. Primeiro tentarei associar uma transação já existente; se não houver correspondência segura, criarei uma nova transação de baixa.", mapOf(
+                    "itemPlanejadoId", command.monthlyPlanItemId(),
+                    "transacaoExistenteId", command.transactionId(),
+                    "descricao", planDescription(command),
+                    "valor", command.amount(),
+                    "data", occurredOn,
+                    "criarItemSeNaoExistir", command.createIfMissing(),
+                    "preferirTransacaoExistente", command.preferExistingTransaction(),
+                    "forcarReassociacao", command.forceRelink()
+            ));
+        }
+        MonthlyPlanItemResponse response = reconciliationService.payPlanItemFromAi(
+                ownerEmail,
+                command.monthlyPlanItemId(),
+                command.transactionId(),
+                command.financialPeriodId(),
+                command.transactionType(),
+                planDescription(command),
+                command.amount(),
+                occurredOn.toString(),
+                command.accountName(),
+                command.categoryName(),
+                command.planItemNature(),
+                command.recurring(),
+                command.createIfMissing(),
+                command.preferExistingTransaction(),
+                originalMessage(command),
+                command.notes()
+        );
+        return executed(command.type(), "Baixa do planejamento mensal processada com sucesso.", mapOf("monthlyPlanItem", response));
+    }
+
+    private FinanceCommandResult reopenMonthlyPlanItem(String ownerEmail, FinanceCommandItem command, boolean dryRun) {
+        LocalDate referenceDate = parseDateOrToday(command.occurredOn() == null ? command.dueDate() : command.occurredOn());
+        String safeDescription = command.monthlyPlanItemId() == null ? planDescription(command) : optionalPlanDescription(command);
+        if (dryRun) {
+            return previewed(command.type(), true, "Vou desfazer a baixa e marcar o item planejado como pendente.", mapOf(
+                    "itemPlanejadoId", command.monthlyPlanItemId(),
+                    "descricao", safeDescription,
+                    "dataReferencia", referenceDate,
+                    "excluirTransacoesVinculadas", command.deleteLinkedTransactions(),
+                    "observacao", command.notes()
+            ));
+        }
+        MonthlyPlanItemResponse response = reconciliationService.reopenPlanItemFromAi(
+                ownerEmail,
+                command.monthlyPlanItemId(),
+                command.financialPeriodId(),
+                command.transactionType(),
+                safeDescription,
+                command.amount(),
+                referenceDate.toString(),
+                command.accountName(),
+                command.categoryName(),
+                command.planItemNature(),
+                command.deleteLinkedTransactions(),
+                command.createIfMissing(),
+                command.notes()
+        );
+        String message = Boolean.TRUE.equals(command.deleteLinkedTransactions())
+                ? "Baixa desfeita. As transações vinculadas foram excluídas e o item voltou para pendente."
+                : "Baixa desfeita. As transações vinculadas foram mantidas como lançamentos avulsos e o item voltou para pendente.";
+        return executed(command.type(), message, mapOf("monthlyPlanItem", response));
+    }
+
+    private FinanceCommandResult increaseMonthlyPlanItemExpectedAmount(String ownerEmail, FinanceCommandItem command, boolean dryRun) {
+        LocalDate dueDate = parseDateOrToday(command.dueDate() == null ? command.occurredOn() : command.dueDate());
+        String safeDescription = planDescription(command);
+        if (dryRun) {
+            return previewed(command.type(), false, "Vou aumentar o valor previsto de um item do planejamento, sem marcar como pago e sem criar baixa.", mapOf(
+                    "descricao", safeDescription,
+                    "tipo", parseTransactionType(command.transactionType()).name(),
+                    "valorAdicionar", command.amount(),
+                    "vencimento", dueDate,
+                    "natureza", command.planItemNature(),
+                    "recorrente", command.recurring(),
+                    "limiteRecorrencia", command.recurrenceEndDate()
+            ));
+        }
+        MonthlyPlanItemResponse response = financialPeriodService.increaseMonthlyPlanItemExpectedAmountFromAi(
+                ownerEmail,
+                command.transactionType(),
+                safeDescription,
+                command.amount(),
+                dueDate.toString(),
+                command.accountName(),
+                command.categoryName(),
+                command.planItemNature(),
+                command.recurring(),
+                command.recurrenceEndDate(),
+                command.notes()
+        );
+        return executed(command.type(), "Valor previsto do planejamento atualizado com sucesso, sem baixa/pagamento.", mapOf("monthlyPlanItem", response));
+    }
+
+    private FinanceCommandResult createInstallmentMonthlyPlanItems(String ownerEmail, FinanceCommandItem command, boolean dryRun) {
+        int installments = command.installmentCount() == null || command.installmentCount() <= 0 ? 1 : command.installmentCount();
+        LocalDate firstDueDate = parseDateOrToday(command.firstDueDate() == null ? (command.dueDate() == null ? command.occurredOn() : command.dueDate()) : command.firstDueDate());
+        String safeDescription = planDescription(command);
+        if (dryRun) {
+            return previewed(command.type(), installments > 1, "Vou distribuir parcelas no planejamento mensal, criando ciclos futuros quando necessário e apenas aumentando o previsto, sem marcar como pago.", mapOf(
+                    "descricao", safeDescription,
+                    "tipo", parseTransactionType(command.transactionType()).name(),
+                    "valorParcela", command.amount(),
+                    "parcelas", installments,
+                    "primeiroVencimento", firstDueDate,
+                    "categoria", command.categoryName(),
+                    "conta", command.accountName()
+            ));
+        }
+        List<MonthlyPlanItemResponse> responses = financialPeriodService.createInstallmentPlanItemsFromAi(
+                ownerEmail,
+                command.transactionType(),
+                safeDescription,
+                command.amount(),
+                installments,
+                firstDueDate.toString(),
+                command.accountName(),
+                command.categoryName(),
+                command.planItemNature(),
+                command.recurring(),
+                command.recurrenceEndDate(),
+                command.notes()
+        );
+        return executed(command.type(), "Parcelas distribuídas no planejamento mensal com sucesso.", mapOf(
+                "parcelasCriadasOuAtualizadas", responses.size(),
+                "monthlyPlanItems", responses
+        ));
+    }
+
+    private FinanceCommandResult linkTransactionToMonthlyPlanItem(String ownerEmail, FinanceCommandItem command, boolean dryRun) {
+        LocalDate occurredOn = parseDateOrToday(command.occurredOn() == null ? command.dueDate() : command.occurredOn());
+        if (dryRun) {
+            boolean ambiguous = command.monthlyPlanItemId() == null || command.transactionId() == null;
+            return previewed(command.type(), ambiguous, "Vou associar uma transação existente a um item planejado, sem criar novo gasto/receita.", mapOf(
+                    "itemPlanejadoId", command.monthlyPlanItemId(),
+                    "transacaoId", command.transactionId(),
+                    "descricaoItem", planDescription(command),
+                    "descricaoTransacao", command.transactionDescription(),
+                    "valor", command.amount(),
+                    "data", occurredOn,
+                    "forcarReassociacao", command.forceRelink()
+            ));
+        }
+        MonthlyPlanItemResponse response = reconciliationService.linkTransactionToPlanItemFromAi(
+                ownerEmail,
+                command.monthlyPlanItemId(),
+                command.transactionId(),
+                command.financialPeriodId(),
+                command.transactionType(),
+                planDescription(command),
+                command.transactionDescription(),
+                command.amount(),
+                occurredOn.toString(),
+                command.accountName(),
+                command.categoryName(),
+                command.planItemNature(),
+                command.recurring(),
+                command.createIfMissing(),
+                command.forceRelink(),
+                command.notes()
+        );
+        return executed(command.type(), "Transação associada ao planejamento mensal com sucesso.", mapOf("monthlyPlanItem", response));
+    }
+
+    private FinanceCommandResult reconcileMonthlyPlan(String ownerEmail, FinanceCommandItem command, boolean dryRun) {
+        Long periodId = command.financialPeriodId();
+        if (periodId == null) {
+            LocalDate reference = parseDateOrToday(command.occurredOn());
+            periodId = financialPeriodService.findOrCreateForDate(ownerEmail, reference).getId();
+        }
+        MonthlyPlanReconcileRequest request = new MonthlyPlanReconcileRequest(
+                dryRun,
+                command.createMissingPlanItems(),
+                command.linkExistingTransactions(),
+                command.onlyUnlinkedTransactions(),
+                command.defaultNature() == null ? parseNatureOrNull(command.planItemNature()) : command.defaultNature(),
+                command.recurring(),
+                command.reconcileTransactionType() == null ? parseTransactionTypeOrNull(command.transactionType()) : command.reconcileTransactionType(),
+                parseDateOrNull(command.from()),
+                parseDateOrNull(command.to()),
+                command.createPlanItemsAsPendingOnly(),
+                command.deleteSourceTransactionsWhenCreatingPlanItems()
+        );
+        MonthlyPlanReconcileResponse response = reconciliationService.reconcile(ownerEmail, periodId, request);
+        return dryRun
+                ? previewed(command.type(), true, response.message(), mapOf("reconciliation", response))
+                : executed(command.type(), response.message(), mapOf("reconciliation", response));
+    }
+
     private FinanceCommandResult previewed(FinanceCommandType type, boolean requiresConfirmation, String message, Map<String, Object> details) {
         return new FinanceCommandResult(type, AiCommandStatus.PREVIEWED, message, requiresConfirmation, details);
     }
@@ -351,6 +596,29 @@ public class FinanceCommandExecutor {
         return map;
     }
 
+    private String optionalPlanDescription(FinanceCommandItem command) {
+        if (command.planItemDescription() != null && !command.planItemDescription().isBlank()) {
+            return command.planItemDescription().trim();
+        }
+        if (command.description() != null && !command.description().isBlank()) {
+            return command.description().trim();
+        }
+        if (command.transactionDescription() != null && !command.transactionDescription().isBlank()) {
+            return command.transactionDescription().trim();
+        }
+        return null;
+    }
+
+    private String planDescription(FinanceCommandItem command) {
+        if (command.planItemDescription() != null && !command.planItemDescription().isBlank()) {
+            return command.planItemDescription().trim();
+        }
+        if (command.description() != null && !command.description().isBlank()) {
+            return command.description().trim();
+        }
+        return required(command.transactionDescription(), "Informe a descrição do item planejado.");
+    }
+
     private String categoryName(FinanceCommandItem command) {
         if (command.categoryName() != null && !command.categoryName().isBlank()) {
             return command.categoryName().trim();
@@ -388,6 +656,18 @@ public class FinanceCommandExecutor {
             case "EXPENSE", "DESPESA", "SAIDA", "SAÍDA", "GASTO", "PAGAMENTO" -> TransactionType.EXPENSE;
             case "TRANSFER", "TRANSFERENCIA", "TRANSFERÊNCIA" -> TransactionType.TRANSFER;
             default -> TransactionType.valueOf(normalized);
+        };
+    }
+
+    private MonthlyPlanItemNature parseNatureOrNull(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        String normalized = value.trim().toUpperCase();
+        return switch (normalized) {
+            case "FIXED", "FIXA", "FIXO" -> MonthlyPlanItemNature.FIXED;
+            case "VARIABLE", "VARIAVEL", "VARIÁVEL", "VARIAVEIS", "VARIÁVEIS" -> MonthlyPlanItemNature.VARIABLE;
+            default -> MonthlyPlanItemNature.valueOf(normalized);
         };
     }
 

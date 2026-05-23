@@ -44,9 +44,11 @@ public class FinancialTransactionController {
             @RequestParam(required = false) Long accountId,
             @RequestParam(required = false) Long categoryId,
             @RequestParam(required = false) TransactionType type,
+            @RequestParam(required = false) Long periodId,
+            @RequestParam(required = false) Long planItemId,
             Principal principal
     ) {
-        return ResponseEntity.ok(transactionService.search(principal.getName(), from, to, accountId, categoryId, type));
+        return ResponseEntity.ok(transactionService.search(principal.getName(), from, to, accountId, categoryId, type, periodId, planItemId));
     }
 
     @GetMapping("/{id}")

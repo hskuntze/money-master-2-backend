@@ -36,10 +36,10 @@ public class FinancialReportService {
     @Transactional(readOnly = true)
     public FinancialSummaryResponse summary(String ownerEmail, LocalDate from, LocalDate to) {
         validatePeriod(from, to);
-        BigDecimal income = transactionRepository.sumAmount(ownerEmail, null, from, to, TransactionType.INCOME);
-        BigDecimal expense = transactionRepository.sumAmount(ownerEmail, null, from, to, TransactionType.EXPENSE);
-        BigDecimal transfer = transactionRepository.sumAmount(ownerEmail, null, from, to, TransactionType.TRANSFER);
-        long count = transactionRepository.search(ownerEmail, from, to, null, null, null).size();
+        BigDecimal income = transactionRepository.sumAmount(ownerEmail, null, from, to, null, TransactionType.INCOME);
+        BigDecimal expense = transactionRepository.sumAmount(ownerEmail, null, from, to, null, TransactionType.EXPENSE);
+        BigDecimal transfer = transactionRepository.sumAmount(ownerEmail, null, from, to, null, TransactionType.TRANSFER);
+        long count = transactionRepository.search(ownerEmail, from, to, null, null, null, null, null).size();
         return new FinancialSummaryResponse(
                 from,
                 to,
@@ -59,7 +59,7 @@ public class FinancialReportService {
     @Transactional(readOnly = true)
     public List<DailyCashFlowResponse> dailyCashFlow(String ownerEmail, LocalDate from, LocalDate to) {
         validatePeriod(from, to);
-        List<FinancialTransaction> transactions = transactionRepository.search(ownerEmail, from, to, null, null, null);
+        List<FinancialTransaction> transactions = transactionRepository.search(ownerEmail, from, to, null, null, null, null, null);
         Map<LocalDate, List<FinancialTransaction>> byDate = transactions.stream()
                 .collect(Collectors.groupingBy(FinancialTransaction::getOccurredOn, TreeMap::new, Collectors.toList()));
 
@@ -72,7 +72,7 @@ public class FinancialReportService {
     @Transactional(readOnly = true)
     public List<CategoryReportResponse> byCategory(String ownerEmail, LocalDate from, LocalDate to, TransactionType type) {
         validatePeriod(from, to);
-        List<FinancialTransaction> transactions = transactionRepository.search(ownerEmail, from, to, null, null, type);
+        List<FinancialTransaction> transactions = transactionRepository.search(ownerEmail, from, to, null, null, type, null, null);
 
         return transactions.stream()
                 .filter(transaction -> transaction.getCategory() != null)

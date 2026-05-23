@@ -28,6 +28,9 @@ public class Theme {
     @Column(length = 500)
     private String logoUrl;
 
+    @Column(length = 500)
+    private String faviconUrl;
+
     @Column(nullable = false, length = 20)
     private String primaryColor;
 
@@ -112,6 +115,14 @@ public class Theme {
 
     public void setLogoUrl(String logoUrl) {
         this.logoUrl = logoUrl;
+    }
+
+    public String getFaviconUrl() {
+        return faviconUrl;
+    }
+
+    public void setFaviconUrl(String faviconUrl) {
+        this.faviconUrl = faviconUrl;
     }
 
     public String getPrimaryColor() {

@@ -27,7 +27,9 @@ import jakarta.persistence.Table;
         indexes = {
                 @Index(name = "idx_transaction_owner_date", columnList = "owner_id,occurred_on"),
                 @Index(name = "idx_transaction_account", columnList = "account_id"),
-                @Index(name = "idx_transaction_category", columnList = "category_id")
+                @Index(name = "idx_transaction_category", columnList = "category_id"),
+                @Index(name = "idx_transaction_financial_period", columnList = "financial_period_id"),
+                @Index(name = "idx_transaction_monthly_plan_item", columnList = "monthly_plan_item_id")
         }
 )
 public class FinancialTransaction {
@@ -47,6 +49,14 @@ public class FinancialTransaction {
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "category_id")
     private Category category;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "financial_period_id")
+    private FinancialPeriod financialPeriod;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "monthly_plan_item_id")
+    private MonthlyPlanItem monthlyPlanItem;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 30)
@@ -116,6 +126,22 @@ public class FinancialTransaction {
 
     public void setCategory(Category category) {
         this.category = category;
+    }
+
+    public FinancialPeriod getFinancialPeriod() {
+        return financialPeriod;
+    }
+
+    public void setFinancialPeriod(FinancialPeriod financialPeriod) {
+        this.financialPeriod = financialPeriod;
+    }
+
+    public MonthlyPlanItem getMonthlyPlanItem() {
+        return monthlyPlanItem;
+    }
+
+    public void setMonthlyPlanItem(MonthlyPlanItem monthlyPlanItem) {
+        this.monthlyPlanItem = monthlyPlanItem;
     }
 
     public TransactionType getType() {

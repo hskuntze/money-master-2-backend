@@ -1,8 +1,5 @@
 package br.com.kuntzedevprojects.money_master_2.config.bootstrap;
 
-import java.time.LocalDate;
-import java.time.ZoneId;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
@@ -32,8 +29,7 @@ public class SavingsJarYieldStartupRunner {
         }
 
         try {
-            LocalDate today = LocalDate.now(ZoneId.of(properties.getZoneId()));
-            var results = savingsJarYieldService.applyPendingYieldsForAll(today);
+            var results = savingsJarYieldService.applyPendingYieldsForAll(null);
             int totalMovements = results.stream().mapToInt(result -> result.createdYieldMovements() == null ? 0 : result.createdYieldMovements()).sum();
             logger.info("Savings jar startup yield calculation finished. jars={}, movements={}", results.size(), totalMovements);
         } catch (Exception ex) {
