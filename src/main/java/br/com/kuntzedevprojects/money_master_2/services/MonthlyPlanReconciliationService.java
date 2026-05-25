@@ -111,9 +111,6 @@ public class MonthlyPlanReconciliationService {
         Long accountId = safeRequest.accountId() != null
                 ? safeRequest.accountId()
                 : item.getAccount() == null ? null : item.getAccount().getId();
-        if (accountId == null) {
-            throw new BusinessException("Informe a conta usada na baixa ou vincule uma conta ao item planejado.");
-        }
         Long categoryId = safeRequest.categoryId() != null
                 ? safeRequest.categoryId()
                 : item.getCategory() == null ? null : item.getCategory().getId();

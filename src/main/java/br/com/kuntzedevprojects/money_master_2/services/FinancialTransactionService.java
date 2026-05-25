@@ -87,7 +87,9 @@ public class FinancialTransactionService {
     @Transactional
     public FinancialTransactionResponse create(String ownerEmail, FinancialTransactionCreateRequest request) {
         User owner = currentUserService.findUserByEmail(ownerEmail);
-        Account account = accountService.findOwnedAccount(ownerEmail, request.accountId());
+        Account account = request.accountId() == null
+                ? accountService.getOrCreateDefaultAccount(ownerEmail)
+                : accountService.findOwnedAccount(ownerEmail, request.accountId());
         Category category = request.categoryId() == null ? null : categoryService.findAvailableCategory(ownerEmail, request.categoryId());
         FinancialPeriod period = request.financialPeriodId() == null
                 ? financialPeriodService.findOrCreateForDate(ownerEmail, request.occurredOn())
@@ -135,6 +137,8 @@ public class FinancialTransactionService {
 
         if (request.accountId() != null) {
             transaction.setAccount(accountService.findOwnedAccount(ownerEmail, request.accountId()));
+        } else if (transaction.getAccount() == null) {
+            transaction.setAccount(accountService.getOrCreateDefaultAccount(ownerEmail));
         }
         if (request.categoryId() != null) {
             Category category = categoryService.findAvailableCategory(ownerEmail, request.categoryId());

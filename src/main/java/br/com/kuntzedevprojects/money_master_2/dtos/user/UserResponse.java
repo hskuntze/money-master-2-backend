@@ -16,7 +16,9 @@ public record UserResponse(
         Set<String> permissions,
         Instant createdAt,
         Instant updatedAt,
-        Instant lastLoginAt
+        Instant lastLoginAt,
+        String avatarUrl,
+        Instant avatarUpdatedAt
 ) {
     public static UserResponse from(User user) {
         return new UserResponse(
@@ -30,7 +32,17 @@ public record UserResponse(
                 user.permissionNames(),
                 user.getCreatedAt(),
                 user.getUpdatedAt(),
-                user.getLastLoginAt()
+                user.getLastLoginAt(),
+                avatarUrl(user),
+                user.getAvatarUpdatedAt()
         );
+    }
+
+    private static String avatarUrl(User user) {
+        if (user.getId() == null || user.getAvatarFileName() == null || user.getAvatarFileName().isBlank()) {
+            return null;
+        }
+        String version = user.getAvatarUpdatedAt() == null ? "" : "?v=" + user.getAvatarUpdatedAt().toEpochMilli();
+        return "/users/" + user.getId() + "/avatar" + version;
     }
 }

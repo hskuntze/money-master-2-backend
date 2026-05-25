@@ -17,5 +17,7 @@ public interface AccountRepository extends JpaRepository<Account, Long> {
 
     Optional<Account> findByOwnerEmailIgnoreCaseAndNameIgnoreCase(String ownerEmail, String name);
 
+    Optional<Account> findByOwnerEmailIgnoreCaseAndInternalDefaultTrue(String ownerEmail);
+
     boolean existsByOwnerEmailIgnoreCaseAndNameIgnoreCase(String ownerEmail, String name);
 }

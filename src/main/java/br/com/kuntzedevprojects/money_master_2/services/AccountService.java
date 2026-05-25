@@ -126,21 +126,20 @@ public class AccountService {
             }
             return account;
         }
+        return getOrCreateDefaultAccount(ownerEmail);
+    }
 
-        if (accountName != null && !accountName.isBlank()) {
-            return accountRepository.findByOwnerEmailIgnoreCaseAndNameIgnoreCase(ownerEmail, accountName.trim())
-                    .filter(Account::isActive)
-                    .orElseGet(() -> createDefaultAccount(ownerEmail, accountName.trim()));
-        }
-
-        List<Account> activeAccounts = accountRepository.findByOwnerEmailIgnoreCaseAndActiveTrueOrderByNameAsc(ownerEmail);
-        if (activeAccounts.size() == 1) {
-            return activeAccounts.get(0);
-        }
-
-        return accountRepository.findByOwnerEmailIgnoreCaseAndNameIgnoreCase(ownerEmail, financeAiProperties.getDefaultAccountName())
+    @Transactional
+    public Account getOrCreateDefaultAccount(String ownerEmail) {
+        return accountRepository.findByOwnerEmailIgnoreCaseAndInternalDefaultTrue(ownerEmail)
                 .filter(Account::isActive)
-                .orElseGet(() -> createDefaultAccount(ownerEmail, financeAiProperties.getDefaultAccountName()));
+                .orElseGet(() -> accountRepository.findByOwnerEmailIgnoreCaseAndNameIgnoreCase(ownerEmail, financeAiProperties.getDefaultAccountName())
+                        .filter(Account::isActive)
+                        .map(account -> {
+                            account.setInternalDefault(true);
+                            return account;
+                        })
+                        .orElseGet(() -> createDefaultAccount(ownerEmail, financeAiProperties.getDefaultAccountName())));
     }
 
     @Transactional(readOnly = true)
@@ -177,6 +176,7 @@ public class AccountService {
         account.setType(resolveDefaultAccountType());
         account.setInitialBalance(BigDecimal.ZERO);
         account.setActive(true);
+        account.setInternalDefault(true);
         return accountRepository.save(account);
     }
 

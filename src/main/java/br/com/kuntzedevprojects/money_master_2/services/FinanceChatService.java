@@ -32,6 +32,8 @@ public class FinanceChatService {
     private final CurrentUserService currentUserService;
     private final AiChatConversationRepository conversationRepository;
     private final AiChatMessageRepository messageRepository;
+    private final UserFinancialProfileService financialProfileService;
+    private final FinancialReferenceService financialReferenceService;
 
     public FinanceChatService(
             ChatClient.Builder chatClientBuilder,
@@ -39,7 +41,9 @@ public class FinanceChatService {
             FinanceAiProperties properties,
             CurrentUserService currentUserService,
             AiChatConversationRepository conversationRepository,
-            AiChatMessageRepository messageRepository
+            AiChatMessageRepository messageRepository,
+            UserFinancialProfileService financialProfileService,
+            FinancialReferenceService financialReferenceService
     ) {
         this.chatClient = chatClientBuilder.build();
         this.financeAiTools = financeAiTools;
@@ -47,6 +51,8 @@ public class FinanceChatService {
         this.currentUserService = currentUserService;
         this.conversationRepository = conversationRepository;
         this.messageRepository = messageRepository;
+        this.financialProfileService = financialProfileService;
+        this.financialReferenceService = financialReferenceService;
     }
 
     public FinanceChatResponse chat(String message, String conversationId) {
@@ -60,7 +66,7 @@ public class FinanceChatService {
         try {
             answer = chatClient
                     .prompt()
-                    .system(systemPrompt(conversation, previousMessages))
+                    .system(systemPrompt(conversation, previousMessages, ownerEmail))
                     .user(message)
                     .tools(financeAiTools)
                     .call()
@@ -128,7 +134,7 @@ public class FinanceChatService {
         return title.length() > 120 ? title.substring(0, 120) : title;
     }
 
-    private String systemPrompt(AiChatConversation conversation, List<AiChatMessage> previousMessages) {
+    private String systemPrompt(AiChatConversation conversation, List<AiChatMessage> previousMessages, String ownerEmail) {
         LocalDate today = LocalDate.now(ZoneId.of(properties.getZoneId()));
         return """
                 Você é o assistente financeiro do Money Master.
@@ -140,6 +146,8 @@ public class FinanceChatService {
                 - Formato obrigatório de datas para ferramentas: yyyy-MM-dd.
                 - O usuário autenticado já é definido pelo backend. Nunca peça, invente ou aceite userId/e-mail como parâmetro.
                 - A conversa tem memória persistida no backend. Use o histórico abaixo para entender respostas curtas como "sim", "esses mesmos", "pode atualizar" ou "confirma".
+                - Perfil financeiro do usuário: %s
+                - Referências financeiras cadastradas/ativas: %s
 
                 Arquitetura de tools:
                 - Prefira usar getFinanceContext para consultar contas, saldos, categorias, cofrinhos e transações recentes antes de executar comandos com nomes livres.
@@ -147,6 +155,16 @@ public class FinanceChatService {
                 - Use previewFinanceCommands quando houver alteração em lote, ambiguidade ou risco de mudar muitos dados.
                 - Use executeFinanceCommands quando a intenção estiver clara ou quando o usuário tiver confirmado uma prévia anterior.
                 - As tools antigas continuam disponíveis, mas os comandos estruturados são o caminho preferencial para novas capacidades.
+
+                Esquema obrigatório dos comandos estruturados:
+                - O campo commands[].type é SEMPRE o nome de um comando, como REGISTER_TRANSACTION ou CREATE_MONTHLY_PLAN_ITEM.
+                - Nunca use INCOME, EXPENSE, TRANSFER, RECEITA, DESPESA ou GASTO no campo commands[].type. Esses valores pertencem ao campo commands[].transactionType.
+                - Para registrar uma despesa/gasto avulso, use type=REGISTER_TRANSACTION e transactionType=EXPENSE.
+                - Para registrar uma receita/entrada avulsa, use type=REGISTER_TRANSACTION e transactionType=INCOME.
+                - Para criar uma despesa planejada no ciclo mensal, use type=CREATE_MONTHLY_PLAN_ITEM e transactionType=EXPENSE.
+                - Para criar uma renda planejada no ciclo mensal, use type=CREATE_MONTHLY_PLAN_ITEM e transactionType=INCOME.
+                - Exemplo de despesa avulsa: {"type":"REGISTER_TRANSACTION","transactionType":"EXPENSE","amount":100.00,"description":"Mercado","occurredOn":"yyyy-MM-dd"}.
+                - Exemplo de conta planejada: {"type":"CREATE_MONTHLY_PLAN_ITEM","transactionType":"EXPENSE","amount":8360.84,"description":"Cartão de crédito","dueDate":"yyyy-MM-dd","recurring":false}.
 
                 Comandos estruturados disponíveis:
                 - REGISTER_TRANSACTION: registrar receita, despesa ou transferência avulsa.
@@ -162,13 +180,14 @@ public class FinanceChatService {
                 - PAY_MONTHLY_PLAN_ITEM: dar baixa em conta/renda planejada. O backend tenta primeiro associar transação existente; se não encontrar correspondência segura, cria uma transação de baixa.
                 - REOPEN_MONTHLY_PLAN_ITEM: desfazer baixa/recebimento, marcar item planejado como pendente e opcionalmente excluir transações vinculadas registradas por engano.
                 - INCREASE_MONTHLY_PLAN_ITEM_EXPECTED_AMOUNT: aumentar o valor previsto de um item planejado, sem dar baixa e sem marcar como pago. Use para compras no cartão/fatura quando o usuário está informando gasto ainda não pago.
-                - CREATE_INSTALLMENT_MONTHLY_PLAN_ITEMS: distribuir parcelas em ciclos mensais futuros, criando ciclos quando necessário e somando o valor previsto em cada mês sem baixa. Use para compras parceladas como "4x de R$ 100".
+                - CREATE_INSTALLMENT_MONTHLY_PLAN_ITEMS: compatibilidade antiga para distribuir parcelas direto no planejamento.
+                - CREATE_INSTALLMENT_PURCHASE: criar uma compra parcelada persistida, guardar compra original, parcelas e lançar automaticamente os itens nos ciclos. Prefira este comando para compras parceladas como "4x de R$ 100".
                 - LINK_TRANSACTION_TO_MONTHLY_PLAN_ITEM: associar uma transação já registrada a uma conta/renda planejada, sem criar lançamento novo.
                 - RECONCILE_MONTHLY_PLAN_WITH_TRANSACTIONS: reconciliar lote de transações do ciclo com contas/rendas planejadas. Use prévia antes de executar.
 
                 Regras para lançamentos:
-                - Quando o usuário disser que gastou, pagou, comprou ou teve saída de dinheiro, registre como EXPENSE.
-                - Quando o usuário disser que recebeu, entrou, caiu salário, depósito, reembolso ou entrada de dinheiro, registre como INCOME.
+                - Quando o usuário disser que gastou, pagou, comprou ou teve saída de dinheiro, use transactionType=EXPENSE.
+                - Quando o usuário disser que recebeu, entrou, caiu salário, depósito, reembolso ou entrada de dinheiro, use transactionType=INCOME.
                 - Use sempre valor positivo. A dedução ou soma é calculada pelo tipo da transação.
                 - Se a mensagem não mencionar data, use a data atual.
                 - Se a mensagem não mencionar conta, deixe a conta vazia para o backend usar/criar a conta padrão.
@@ -185,16 +204,22 @@ public class FinanceChatService {
                 - Para montar planejamento a partir de lançamentos antigos/errados sem dar baixa, use RECONCILE_MONTHLY_PLAN_WITH_TRANSACTIONS com createPlanItemsAsPendingOnly=true. Se o usuário disser para limpar/remover esses lançamentos reais, use deleteSourceTransactionsWhenCreatingPlanItems=true.
                 - Para montar o mês conciliando transações reais já pagas/recebidas, use RECONCILE_MONTHLY_PLAN_WITH_TRANSACTIONS com createPlanItemsAsPendingOnly=false em prévia primeiro. Se o usuário confirmar, execute.
                 - Compras no cartão de crédito NÃO significam pagamento da fatura. Não use PAY_MONTHLY_PLAN_ITEM nem LINK_TRANSACTION_TO_MONTHLY_PLAN_ITEM para compras no cartão, salvo se o usuário disser explicitamente que pagou a fatura.
-                - Para compras no cartão de crédito, registre a transação real como EXPENSE e categoria "Cartão de Crédito", mas trate o planejamento como aumento do valor previsto da fatura/Cartão de Crédito, não como realizado/pago.
-                - Para compras parceladas no cartão, entenda "4x de R$ 100" como 4 parcelas mensais de R$ 100. Use CREATE_INSTALLMENT_MONTHLY_PLAN_ITEMS para somar cada parcela ao item "Cartão de Crédito" no respectivo ciclo. O backend cria ciclos futuros e replica recorrências quando necessário.
-                - Em CREATE_INSTALLMENT_MONTHLY_PLAN_ITEMS, use firstDueDate como o vencimento do item "Cartão de Crédito" no ciclo da primeira parcela quando ele existir no contexto; se não existir, use a melhor data de vencimento inferida.
-                - Ao usar CREATE_INSTALLMENT_MONTHLY_PLAN_ITEMS junto com REGISTER_TRANSACTION para manter histórico, defina skipMonthlyPlanAutoAdjustment=true nos comandos REGISTER_TRANSACTION relacionados para não somar duas vezes o mesmo gasto no planejamento.
+                - Para compras no cartão de crédito, registre a transação real com type=REGISTER_TRANSACTION, transactionType=EXPENSE e categoria "Cartão de Crédito", mas trate o planejamento como aumento do valor previsto da fatura/Cartão de Crédito, não como realizado/pago.
+                - Para compras parceladas no cartão, entenda "4x de R$ 100" como 4 parcelas mensais de R$ 100. Use CREATE_INSTALLMENT_PURCHASE para persistir a compra original e gerar as parcelas nos ciclos.
+                - Em CREATE_INSTALLMENT_PURCHASE, use amount como valor da parcela quando o usuário disser "4x de R$ 100". Use installmentCount e firstDueDate.
+                - Se também registrar uma transação histórica da compra parcelada, defina skipMonthlyPlanAutoAdjustment=true para não somar duas vezes o planejamento.
                 - Se a compra no cartão não for parcelada, use INCREASE_MONTHLY_PLAN_ITEM_EXPECTED_AMOUNT para somar ao previsto do item "Cartão de Crédito", sem baixa.
                 - Transações diárias registradas pelo chat podem ser associadas automaticamente pelo backend a um item variável compatível do ciclo, como "Mercado" ou "Combustível". Compras de cartão são exceção: elas devem aumentar o previsto da fatura, não o realizado.
                 - Natureza: FIXED para internet, aluguel, prestação, seguro, assinatura, consórcio, financiamento, salário; VARIABLE para cartão de crédito, água, luz, mercado, combustível, bônus, freelances e gastos que mudam.
                 - Recorrência com data máxima: quando o usuário disser "até", "última parcela em", "por X meses" ou indicar término, preencha recurrenceEndDate. Depois desta data, o backend não replica o item para ciclos futuros.
                 - Recorrente: true para obrigações/receitas que devem voltar no próximo ciclo; false para eventos pontuais.
                 - Se o usuário disser "não crie novas transações", use somente associação/reconciliação com transações existentes.
+
+                Regras para perfil financeiro, dicas e investimentos:
+                - Antes de dar dicas financeiras personalizadas, considere o perfil financeiro acima.
+                - Recomendações devem ser educacionais, contextualizadas e sem promessa de rentabilidade.
+                - Se faltarem dados relevantes do perfil, explique a limitação e peça os dados necessários.
+                - Para investimentos, considere objetivos, horizonte, tolerância a risco, capacidade de poupança e conhecimento informado.
 
                 Regras para categorias:
                 - Se o usuário usar a palavra "tipo" com nomes livres como "outro", "cartão de crédito", "mercado" ou "alimentação", interprete como categoria, não como TransactionType.
@@ -228,7 +253,13 @@ public class FinanceChatService {
 
                 Histórico recente da conversa:
                 %s
-                """.formatted(today, conversation.getConversationKey(), renderHistory(previousMessages));
+                """.formatted(
+                today,
+                conversation.getConversationKey(),
+                financialProfileService.buildPromptContext(ownerEmail),
+                financialReferenceService.buildPromptContext(ownerEmail),
+                renderHistory(previousMessages)
+        );
     }
 
     private String renderHistory(List<AiChatMessage> messages) {

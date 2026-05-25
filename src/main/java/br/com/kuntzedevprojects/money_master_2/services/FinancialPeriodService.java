@@ -178,7 +178,8 @@ public class FinancialPeriodService {
     public FinancialPeriodResponse closePeriodById(String ownerEmail, Long id) {
         FinancialPeriod period = findOwnedPeriod(ownerEmail, id);
         applyStatus(ownerEmail, period, FinancialPeriodStatus.CLOSED);
-        return FinancialPeriodResponse.from(period);
+        FinancialPeriod nextPeriod = ensureNextPeriodAfterClose(ownerEmail, period);
+        return FinancialPeriodResponse.from(nextPeriod);
     }
 
     @Transactional(readOnly = true)
@@ -251,7 +252,7 @@ public class FinancialPeriodService {
         ensurePlanningEditable(period);
         validateDueDate(period, request.dueDate());
 
-        Account account = request.accountId() == null ? null : accountService.findOwnedAccount(ownerEmail, request.accountId());
+        Account account = request.accountId() == null ? accountService.getOrCreateDefaultAccount(ownerEmail) : accountService.findOwnedAccount(ownerEmail, request.accountId());
         Category category = request.categoryId() == null ? null : categoryService.findAvailableCategory(ownerEmail, request.categoryId());
         validateCategoryType(category, request.type());
 
@@ -429,7 +430,7 @@ public class FinancialPeriodService {
         if (dueDate.isBefore(period.getStartDate()) || dueDate.isAfter(period.getEndDate())) {
             dueDate = clampDate(dueDate, period);
         }
-        Account account = accountName == null || accountName.isBlank() ? null : accountService.resolveForAi(ownerEmail, null, accountName);
+        Account account = accountService.resolveForAi(ownerEmail, null, accountName);
         Category category = categoryName == null || categoryName.isBlank() ? null : categoryService.resolveForAi(ownerEmail, null, categoryName, type);
         MonthlyPlanItem item = resolveOrCreateVariablePlanItem(ownerEmail, period, type, planItemDescription, dueDate, account, category, natureText, Boolean.TRUE.equals(recurring), recurrenceEndDateText, notes);
         item.setExpectedAmount(nullToZero(item.getExpectedAmount()).add(amount).setScale(2, RoundingMode.HALF_UP));
@@ -541,7 +542,7 @@ public class FinancialPeriodService {
         MonthlyPlanItem item = new MonthlyPlanItem();
         item.setOwner(currentUserService.findUserByEmail(ownerEmail));
         item.setFinancialPeriod(period);
-        item.setAccount(account);
+        item.setAccount(account == null ? accountService.getOrCreateDefaultAccount(ownerEmail) : account);
         item.setCategory(category);
         item.setType(type);
         item.setDescription(safeDescription);
@@ -554,6 +555,31 @@ public class FinancialPeriodService {
         item.setRecurrenceEndDate(validateRecurrenceEndDate(recurring, parseDateOrNull(recurrenceEndDateText), dueDate));
         item.setNotes(normalizeNullable(notes));
         return planItemRepository.save(item);
+    }
+
+
+    private FinancialPeriod ensureNextPeriodAfterClose(String ownerEmail, FinancialPeriod closedPeriod) {
+        LocalDate nextStart = closedPeriod.getEndDate().plusDays(1);
+        FinancialPeriod nextPeriod = periodRepository.findByOwnerEmailAndStartDate(ownerEmail, nextStart)
+                .orElseGet(() -> {
+                    FinancialPeriod created = new FinancialPeriod();
+                    created.setOwner(closedPeriod.getOwner());
+                    created.setName(defaultPeriodName(nextStart));
+                    created.setStartDate(nextStart);
+                    created.setEndDate(nextStart.plusMonths(1).minusDays(1));
+                    created.setTurnoverDay(nextStart.getDayOfMonth());
+                    created.setStatus(nextStart.isAfter(LocalDate.now()) ? FinancialPeriodStatus.SCHEDULED : FinancialPeriodStatus.OPEN);
+                    return periodRepository.save(created);
+                });
+        cloneRecurringPlanItems(ownerEmail, closedPeriod, nextPeriod);
+        if (nextPeriod.getStatus() != FinancialPeriodStatus.OPEN && !nextPeriod.getStartDate().isAfter(LocalDate.now())) {
+            nextPeriod.setStatus(FinancialPeriodStatus.OPEN);
+            nextPeriod.setClosedAt(null);
+        }
+        if (nextPeriod.getStatus() == FinancialPeriodStatus.OPEN) {
+            demoteOtherOpenPeriods(ownerEmail, nextPeriod.getId());
+        }
+        return nextPeriod;
     }
 
     private void closePeriod(String ownerEmail, FinancialPeriod period, LocalDate endDate) {
@@ -570,13 +596,21 @@ public class FinancialPeriodService {
     }
 
     private void cloneRecurringPlanItems(String ownerEmail, FinancialPeriod sourcePeriod, FinancialPeriod targetPeriod) {
-        if (targetPeriod.getId() != null && !planItemRepository.findByOwnerEmailAndPeriod(ownerEmail, targetPeriod.getId(), null).isEmpty()) {
-            return;
-        }
         List<MonthlyPlanItem> recurringItems = planItemRepository.findRecurringByOwnerEmailAndPeriod(ownerEmail, sourcePeriod.getId());
+        List<MonthlyPlanItem> existingTargetItems = targetPeriod.getId() == null
+                ? List.of()
+                : planItemRepository.findByOwnerEmailAndPeriod(ownerEmail, targetPeriod.getId(), null);
         recurringItems.forEach(source -> {
             LocalDate dueDate = copyDayIntoPeriod(source.getDueDate(), targetPeriod);
             if (source.getRecurrenceEndDate() != null && dueDate.isAfter(source.getRecurrenceEndDate())) {
+                return;
+            }
+            boolean alreadyCloned = existingTargetItems.stream().anyMatch(existing ->
+                    existing.isRecurring()
+                            && existing.getType() == source.getType()
+                            && normalizeComparable(existing.getDescription()).equals(normalizeComparable(source.getDescription()))
+            );
+            if (alreadyCloned) {
                 return;
             }
             MonthlyPlanItem item = new MonthlyPlanItem();

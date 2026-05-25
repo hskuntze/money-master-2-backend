@@ -12,6 +12,7 @@ public record AccountResponse(
         AccountType type,
         BigDecimal initialBalance,
         boolean active,
+        boolean internalDefault,
         Instant createdAt,
         Instant updatedAt
 ) {
@@ -22,6 +23,7 @@ public record AccountResponse(
                 account.getType(),
                 account.getInitialBalance(),
                 account.isActive(),
+                account.isInternalDefault(),
                 account.getCreatedAt(),
                 account.getUpdatedAt()
         );

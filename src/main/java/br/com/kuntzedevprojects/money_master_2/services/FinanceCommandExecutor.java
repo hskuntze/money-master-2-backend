@@ -27,6 +27,7 @@ import br.com.kuntzedevprojects.money_master_2.dtos.finance.CategoryCreateReques
 import br.com.kuntzedevprojects.money_master_2.dtos.finance.CategoryResponse;
 import br.com.kuntzedevprojects.money_master_2.dtos.finance.FinancialTransactionResponse;
 import br.com.kuntzedevprojects.money_master_2.dtos.finance.MonthlyPlanItemResponse;
+import br.com.kuntzedevprojects.money_master_2.dtos.installments.InstallmentPurchaseResponse;
 import br.com.kuntzedevprojects.money_master_2.dtos.finance.MonthlyPlanReconcileRequest;
 import br.com.kuntzedevprojects.money_master_2.dtos.finance.MonthlyPlanReconcileResponse;
 import br.com.kuntzedevprojects.money_master_2.dtos.savingsjar.SavingsJarBalanceCorrectionResponse;
@@ -55,6 +56,7 @@ public class FinanceCommandExecutor {
     private final FinancialReportService reportService;
     private final FinancialPeriodService financialPeriodService;
     private final MonthlyPlanReconciliationService reconciliationService;
+    private final InstallmentPurchaseService installmentPurchaseService;
     private final FinancialTransactionRepository transactionRepository;
     private final AiCommandAuditRepository auditRepository;
     private final ObjectMapper objectMapper;
@@ -68,6 +70,7 @@ public class FinanceCommandExecutor {
             FinancialReportService reportService,
             FinancialPeriodService financialPeriodService,
             MonthlyPlanReconciliationService reconciliationService,
+            InstallmentPurchaseService installmentPurchaseService,
             FinancialTransactionRepository transactionRepository,
             AiCommandAuditRepository auditRepository,
             ObjectMapper objectMapper
@@ -80,6 +83,7 @@ public class FinanceCommandExecutor {
         this.reportService = reportService;
         this.financialPeriodService = financialPeriodService;
         this.reconciliationService = reconciliationService;
+        this.installmentPurchaseService = installmentPurchaseService;
         this.transactionRepository = transactionRepository;
         this.auditRepository = auditRepository;
         this.objectMapper = objectMapper;
@@ -145,7 +149,8 @@ public class FinanceCommandExecutor {
         }
         try {
             FinanceCommandResult result = switch (command.type()) {
-                case REGISTER_TRANSACTION -> registerTransaction(ownerEmail, command, dryRun);
+                case REGISTER_TRANSACTION -> registerTransaction(ownerEmail, command, dryRun, null);
+                case INCOME, EXPENSE, TRANSFER -> registerTransaction(ownerEmail, command, dryRun, command.type().impliedTransactionType());
                 case CHANGE_TRANSACTION_CATEGORY_BY_CATEGORY -> changeCategoryByCategory(ownerEmail, command, dryRun);
                 case CHANGE_TRANSACTION_CATEGORY_BY_DESCRIPTION_DATE -> changeCategoryByDescriptionAndDate(ownerEmail, command, dryRun);
                 case CREATE_CATEGORY -> createCategory(ownerEmail, command, dryRun);
@@ -159,6 +164,7 @@ public class FinanceCommandExecutor {
                 case REOPEN_MONTHLY_PLAN_ITEM -> reopenMonthlyPlanItem(ownerEmail, command, dryRun);
                 case INCREASE_MONTHLY_PLAN_ITEM_EXPECTED_AMOUNT -> increaseMonthlyPlanItemExpectedAmount(ownerEmail, command, dryRun);
                 case CREATE_INSTALLMENT_MONTHLY_PLAN_ITEMS -> createInstallmentMonthlyPlanItems(ownerEmail, command, dryRun);
+                case CREATE_INSTALLMENT_PURCHASE -> createInstallmentPurchase(ownerEmail, command, dryRun);
                 case LINK_TRANSACTION_TO_MONTHLY_PLAN_ITEM -> linkTransactionToMonthlyPlanItem(ownerEmail, command, dryRun);
                 case RECONCILE_MONTHLY_PLAN_WITH_TRANSACTIONS -> reconcileMonthlyPlan(ownerEmail, command, dryRun);
             };
@@ -179,10 +185,11 @@ public class FinanceCommandExecutor {
         }
     }
 
-    private FinanceCommandResult registerTransaction(String ownerEmail, FinanceCommandItem command, boolean dryRun) {
+    private FinanceCommandResult registerTransaction(String ownerEmail, FinanceCommandItem command, boolean dryRun, String impliedTransactionType) {
+        String transactionType = firstNonBlank(command.transactionType(), impliedTransactionType);
         if (dryRun) {
-            return previewed(command.type(), true, "Vou registrar um lançamento financeiro.", mapOf(
-                    "tipo", command.transactionType(),
+            return previewed(FinanceCommandType.REGISTER_TRANSACTION, true, "Vou registrar um lançamento financeiro.", mapOf(
+                    "tipo", transactionType,
                     "valor", command.amount(),
                     "descricao", command.description(),
                     "data", command.occurredOn(),
@@ -192,7 +199,7 @@ public class FinanceCommandExecutor {
         }
         ToolTransactionResponse response = transactionService.registerFromAi(
                 ownerEmail,
-                command.transactionType(),
+                transactionType,
                 command.amount(),
                 command.description(),
                 command.occurredOn(),
@@ -202,7 +209,7 @@ public class FinanceCommandExecutor {
                 command.notes(),
                 command.skipMonthlyPlanAutoAdjustment()
         );
-        return executed(command.type(), response.message(), mapOf("transaction", response));
+        return executed(FinanceCommandType.REGISTER_TRANSACTION, response.message(), mapOf("transaction", response));
     }
 
     private FinanceCommandResult changeCategoryByCategory(String ownerEmail, FinanceCommandItem command, boolean dryRun) {
@@ -493,6 +500,32 @@ public class FinanceCommandExecutor {
         ));
     }
 
+
+    private FinanceCommandResult createInstallmentPurchase(String ownerEmail, FinanceCommandItem command, boolean dryRun) {
+        if (dryRun) {
+            return previewed(command.type(), true, "Vou criar uma compra parcelada e lançar as parcelas nos ciclos mensais.", mapOf(
+                    "descricao", planDescription(command),
+                    "valorTotal", command.amount(),
+                    "valorParcela", command.amount(),
+                    "quantidadeParcelas", command.installmentCount(),
+                    "primeiraParcela", command.firstDueDate(),
+                    "categoria", command.categoryName()
+            ));
+        }
+        InstallmentPurchaseResponse response = installmentPurchaseService.createFromAi(
+                ownerEmail,
+                planDescription(command),
+                null,
+                command.amount(),
+                command.installmentCount(),
+                command.occurredOn(),
+                command.firstDueDate(),
+                command.categoryName(),
+                command.notes()
+        );
+        return executed(command.type(), "Compra parcelada criada e parcelas lançadas no planejamento mensal.", mapOf("installmentPurchase", response));
+    }
+
     private FinanceCommandResult linkTransactionToMonthlyPlanItem(String ownerEmail, FinanceCommandItem command, boolean dryRun) {
         LocalDate occurredOn = parseDateOrToday(command.occurredOn() == null ? command.dueDate() : command.occurredOn());
         if (dryRun) {
@@ -568,7 +601,7 @@ public class FinanceCommandExecutor {
             AiCommandAudit audit = new AiCommandAudit();
             audit.setOwner(owner);
             audit.setConversation(conversation);
-            audit.setCommandType(command.type());
+            audit.setCommandType(result.type() == null ? command.type() : result.type());
             audit.setStatus(result.status());
             audit.setDryRun(dryRun);
             audit.setCommandJson(writeJson(command));
@@ -594,6 +627,14 @@ public class FinanceCommandExecutor {
             }
         }
         return map;
+    }
+
+
+    private String firstNonBlank(String preferred, String fallback) {
+        if (preferred != null && !preferred.isBlank()) {
+            return preferred.trim();
+        }
+        return fallback == null || fallback.isBlank() ? null : fallback.trim();
     }
 
     private String optionalPlanDescription(FinanceCommandItem command) {

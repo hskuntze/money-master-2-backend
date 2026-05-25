@@ -11,7 +11,6 @@ import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 
 public record FinancialTransactionCreateRequest(
-        @NotNull(message = "A conta é obrigatória.")
         Long accountId,
 
         Long categoryId,

@@ -64,6 +64,14 @@ public class User implements UserDetails {
 
     private Instant lastLoginAt;
 
+    @Column(length = 255)
+    private String avatarFileName;
+
+    @Column(length = 80)
+    private String avatarContentType;
+
+    private Instant avatarUpdatedAt;
+
     @ManyToMany(fetch = FetchType.EAGER)
     @JoinTable(
             name = "tb_user_role",
@@ -153,6 +161,30 @@ public class User implements UserDetails {
 
     public void setLastLoginAt(Instant lastLoginAt) {
         this.lastLoginAt = lastLoginAt;
+    }
+
+    public String getAvatarFileName() {
+        return avatarFileName;
+    }
+
+    public void setAvatarFileName(String avatarFileName) {
+        this.avatarFileName = avatarFileName;
+    }
+
+    public String getAvatarContentType() {
+        return avatarContentType;
+    }
+
+    public void setAvatarContentType(String avatarContentType) {
+        this.avatarContentType = avatarContentType;
+    }
+
+    public Instant getAvatarUpdatedAt() {
+        return avatarUpdatedAt;
+    }
+
+    public void setAvatarUpdatedAt(Instant avatarUpdatedAt) {
+        this.avatarUpdatedAt = avatarUpdatedAt;
     }
 
     public Set<Role> getRoles() {

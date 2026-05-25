@@ -1,9 +1,8 @@
 package br.com.kuntzedevprojects.money_master_2.entities;
 
-import java.math.BigDecimal;
 import java.time.Instant;
 
-import br.com.kuntzedevprojects.money_master_2.enums.AccountType;
+import br.com.kuntzedevprojects.money_master_2.enums.FinancialReferenceType;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -20,32 +19,37 @@ import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
 
 @Entity
-@Table(name = "tb_account", indexes = { @Index(name = "idx_account_owner", columnList = "owner_id") })
-public class Account {
+@Table(name = "tb_financial_reference", indexes = {
+		@Index(name = "idx_financial_reference_owner_active", columnList = "owner_id,active"),
+		@Index(name = "idx_financial_reference_type", columnList = "type") })
+public class FinancialReference {
 
 	@Id
 	@GeneratedValue(strategy = GenerationType.IDENTITY)
 	private Long id;
 
-	@ManyToOne(fetch = FetchType.LAZY, optional = false)
-	@JoinColumn(name = "owner_id", nullable = false)
+	@ManyToOne(fetch = FetchType.LAZY)
+	@JoinColumn(name = "owner_id")
 	private User owner;
 
-	@Column(nullable = false, length = 120)
-	private String name;
+	@Column(nullable = false, length = 180)
+	private String title;
 
 	@Enumerated(EnumType.STRING)
 	@Column(nullable = false, length = 30)
-	private AccountType type;
+	private FinancialReferenceType type = FinancialReferenceType.ARTICLE;
 
-	@Column(nullable = false, precision = 15, scale = 2)
-	private BigDecimal initialBalance = BigDecimal.ZERO;
+	@Column(length = 1000)
+	private String url;
+
+	@Column(length = 2000)
+	private String description;
+
+	@Column(length = 180)
+	private String source;
 
 	@Column(nullable = false)
 	private boolean active = true;
-
-	@Column(nullable = false)
-	private boolean internalDefault = false;
 
 	@Column(nullable = false, updatable = false)
 	private Instant createdAt;
@@ -78,28 +82,44 @@ public class Account {
 		this.owner = owner;
 	}
 
-	public String getName() {
-		return name;
+	public String getTitle() {
+		return title;
 	}
 
-	public void setName(String name) {
-		this.name = name;
+	public void setTitle(String title) {
+		this.title = title;
 	}
 
-	public AccountType getType() {
+	public FinancialReferenceType getType() {
 		return type;
 	}
 
-	public void setType(AccountType type) {
+	public void setType(FinancialReferenceType type) {
 		this.type = type;
 	}
 
-	public BigDecimal getInitialBalance() {
-		return initialBalance;
+	public String getUrl() {
+		return url;
 	}
 
-	public void setInitialBalance(BigDecimal initialBalance) {
-		this.initialBalance = initialBalance;
+	public void setUrl(String url) {
+		this.url = url;
+	}
+
+	public String getDescription() {
+		return description;
+	}
+
+	public void setDescription(String description) {
+		this.description = description;
+	}
+
+	public String getSource() {
+		return source;
+	}
+
+	public void setSource(String source) {
+		this.source = source;
 	}
 
 	public boolean isActive() {
@@ -108,14 +128,6 @@ public class Account {
 
 	public void setActive(boolean active) {
 		this.active = active;
-	}
-
-	public boolean isInternalDefault() {
-		return internalDefault;
-	}
-
-	public void setInternalDefault(boolean internalDefault) {
-		this.internalDefault = internalDefault;
 	}
 
 	public Instant getCreatedAt() {

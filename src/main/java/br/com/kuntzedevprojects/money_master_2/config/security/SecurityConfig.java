@@ -15,12 +15,15 @@ import org.springframework.security.config.annotation.web.configurers.AbstractHt
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
+import org.springframework.security.oauth2.server.resource.web.authentication.BearerTokenAuthenticationFilter;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
+import br.com.kuntzedevprojects.money_master_2.config.onboarding.OnboardingCompletionFilter;
 import br.com.kuntzedevprojects.money_master_2.config.properties.CorsProperties;
+import br.com.kuntzedevprojects.money_master_2.repositories.UserFinancialProfileRepository;
 
 @Configuration
 @EnableMethodSecurity
@@ -36,12 +39,17 @@ public class SecurityConfig {
     private static final String[] PUBLIC_GET_ENDPOINTS = {
             "/auth/confirm-email",
             "/themes/active",
+            "/users/*/avatar",
             "/actuator/health",
             "/actuator/info"
     };
 
     @Bean
-    SecurityFilterChain securityFilterChain(HttpSecurity http, JwtAuthenticationConverter jwtAuthenticationConverter) throws Exception {
+    SecurityFilterChain securityFilterChain(
+            HttpSecurity http,
+            JwtAuthenticationConverter jwtAuthenticationConverter,
+            OnboardingCompletionFilter onboardingCompletionFilter
+    ) throws Exception {
         return http
                 .csrf(AbstractHttpConfigurer::disable)
                 .cors(Customizer.withDefaults())
@@ -54,7 +62,13 @@ public class SecurityConfig {
                         .anyRequest().authenticated()
                 )
                 .oauth2ResourceServer(oauth2 -> oauth2.jwt(jwt -> jwt.jwtAuthenticationConverter(jwtAuthenticationConverter)))
+                .addFilterAfter(onboardingCompletionFilter, BearerTokenAuthenticationFilter.class)
                 .build();
+    }
+
+    @Bean
+    OnboardingCompletionFilter onboardingCompletionFilter(UserFinancialProfileRepository profileRepository) {
+        return new OnboardingCompletionFilter(profileRepository);
     }
 
     @Bean
