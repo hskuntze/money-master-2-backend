@@ -6,6 +6,7 @@ import java.time.LocalDate;
 
 import br.com.kuntzedevprojects.money_master_2.entities.InstallmentPurchaseEntry;
 import br.com.kuntzedevprojects.money_master_2.enums.InstallmentEntryStatus;
+import br.com.kuntzedevprojects.money_master_2.enums.InstallmentPaymentSource;
 
 public record InstallmentPurchaseEntryResponse(
         Long id,
@@ -17,6 +18,11 @@ public record InstallmentPurchaseEntryResponse(
         LocalDate dueDate,
         BigDecimal amount,
         InstallmentEntryStatus status,
+        LocalDate paidOn,
+        InstallmentPaymentSource paymentSource,
+        Long paidById,
+        String paidByName,
+        Instant paymentRegisteredAt,
         String notes,
         Instant createdAt,
         Instant updatedAt
@@ -32,6 +38,11 @@ public record InstallmentPurchaseEntryResponse(
                 entry.getDueDate(),
                 entry.getAmount(),
                 entry.getStatus(),
+                entry.getPaidOn(),
+                entry.getPaymentSource(),
+                entry.getPaidBy() == null ? null : entry.getPaidBy().getId(),
+                entry.getPaidBy() == null ? null : entry.getPaidBy().getName(),
+                entry.getPaymentRegisteredAt(),
                 entry.getNotes(),
                 entry.getCreatedAt(),
                 entry.getUpdatedAt()

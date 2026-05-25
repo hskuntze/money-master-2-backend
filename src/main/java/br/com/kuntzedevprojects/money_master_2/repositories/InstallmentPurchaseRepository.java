@@ -19,6 +19,7 @@ public interface InstallmentPurchaseRepository extends JpaRepository<Installment
             left join fetch p.entries e
             left join fetch e.financialPeriod fp
             left join fetch e.monthlyPlanItem mpi
+            left join fetch mpi.parentItem parentItem
             where lower(p.owner.email) = lower(:ownerEmail)
             order by p.firstDueDate desc, p.id desc
             """)
@@ -32,6 +33,7 @@ public interface InstallmentPurchaseRepository extends JpaRepository<Installment
             left join fetch p.entries e
             left join fetch e.financialPeriod fp
             left join fetch e.monthlyPlanItem mpi
+            left join fetch mpi.parentItem parentItem
             where p.id = :id
               and lower(p.owner.email) = lower(:ownerEmail)
             """)

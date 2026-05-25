@@ -40,7 +40,10 @@ public record InstallmentPurchaseResponse(
                 .toList();
         int posted = (int) entryResponses.stream().filter(entry -> entry.monthlyPlanItemId() != null).count();
         int paid = (int) purchase.getEntries().stream().filter(entry -> entry.getStatus() == InstallmentEntryStatus.PAID).count();
-        int pending = Math.max(0, purchase.getInstallmentCount() - paid);
+        int pending = (int) purchase.getEntries().stream()
+                .filter(entry -> entry.getStatus() != InstallmentEntryStatus.PAID)
+                .filter(entry -> entry.getStatus() != InstallmentEntryStatus.CANCELED)
+                .count();
         BigDecimal paidAmount = purchase.getEntries().stream()
                 .filter(entry -> entry.getStatus() == InstallmentEntryStatus.PAID)
                 .map(entry -> entry.getAmount() == null ? BigDecimal.ZERO : entry.getAmount())

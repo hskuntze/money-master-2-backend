@@ -28,6 +28,7 @@ import br.com.kuntzedevprojects.money_master_2.dtos.finance.CategoryResponse;
 import br.com.kuntzedevprojects.money_master_2.dtos.finance.FinancialTransactionResponse;
 import br.com.kuntzedevprojects.money_master_2.dtos.finance.MonthlyPlanItemResponse;
 import br.com.kuntzedevprojects.money_master_2.dtos.installments.InstallmentPurchaseResponse;
+import br.com.kuntzedevprojects.money_master_2.dtos.installments.InstallmentPaymentResultResponse;
 import br.com.kuntzedevprojects.money_master_2.dtos.finance.MonthlyPlanReconcileRequest;
 import br.com.kuntzedevprojects.money_master_2.dtos.finance.MonthlyPlanReconcileResponse;
 import br.com.kuntzedevprojects.money_master_2.dtos.savingsjar.SavingsJarBalanceCorrectionResponse;
@@ -165,6 +166,7 @@ public class FinanceCommandExecutor {
                 case INCREASE_MONTHLY_PLAN_ITEM_EXPECTED_AMOUNT -> increaseMonthlyPlanItemExpectedAmount(ownerEmail, command, dryRun);
                 case CREATE_INSTALLMENT_MONTHLY_PLAN_ITEMS -> createInstallmentMonthlyPlanItems(ownerEmail, command, dryRun);
                 case CREATE_INSTALLMENT_PURCHASE -> createInstallmentPurchase(ownerEmail, command, dryRun);
+                case PAY_INSTALLMENT_PURCHASE -> payInstallmentPurchase(ownerEmail, command, dryRun);
                 case LINK_TRANSACTION_TO_MONTHLY_PLAN_ITEM -> linkTransactionToMonthlyPlanItem(ownerEmail, command, dryRun);
                 case RECONCILE_MONTHLY_PLAN_WITH_TRANSACTIONS -> reconcileMonthlyPlan(ownerEmail, command, dryRun);
             };
@@ -526,6 +528,29 @@ public class FinanceCommandExecutor {
         return executed(command.type(), "Compra parcelada criada e parcelas lançadas no planejamento mensal.", mapOf("installmentPurchase", response));
     }
 
+    private FinanceCommandResult payInstallmentPurchase(String ownerEmail, FinanceCommandItem command, boolean dryRun) {
+        String description = firstNonBlank(command.installmentPurchaseDescription(), planDescriptionOrNull(command), command.description());
+        if (dryRun) {
+            boolean requiresConfirmation = command.installmentPurchaseId() == null && (description == null || description.isBlank());
+            return previewed(command.type(), requiresConfirmation, "Vou dar baixa em parcela(s) de uma compra parcelada.", mapOf(
+                    "compraParceladaId", command.installmentPurchaseId(),
+                    "descricaoCompra", description,
+                    "parcelasParaBaixar", command.installmentsToPay(),
+                    "totalPagoDesejado", command.targetPaidInstallments(),
+                    "dataPagamento", firstNonBlank(command.paymentDate(), command.occurredOn())
+            ));
+        }
+        InstallmentPaymentResultResponse response = installmentPurchaseService.markInstallmentsFromAi(
+                ownerEmail,
+                command.installmentPurchaseId(),
+                description,
+                command.installmentsToPay(),
+                command.targetPaidInstallments(),
+                firstNonBlank(command.paymentDate(), command.occurredOn())
+        );
+        return executed(command.type(), response.message(), mapOf("installmentPurchase", response.purchase()));
+    }
+
     private FinanceCommandResult linkTransactionToMonthlyPlanItem(String ownerEmail, FinanceCommandItem command, boolean dryRun) {
         LocalDate occurredOn = parseDateOrToday(command.occurredOn() == null ? command.dueDate() : command.occurredOn());
         if (dryRun) {
@@ -630,11 +655,16 @@ public class FinanceCommandExecutor {
     }
 
 
-    private String firstNonBlank(String preferred, String fallback) {
-        if (preferred != null && !preferred.isBlank()) {
-            return preferred.trim();
+    private String firstNonBlank(String... values) {
+        if (values == null) {
+            return null;
         }
-        return fallback == null || fallback.isBlank() ? null : fallback.trim();
+        for (String value : values) {
+            if (value != null && !value.isBlank()) {
+                return value.trim();
+            }
+        }
+        return null;
     }
 
     private String optionalPlanDescription(FinanceCommandItem command) {
@@ -648,6 +678,11 @@ public class FinanceCommandExecutor {
             return command.transactionDescription().trim();
         }
         return null;
+    }
+
+    private String planDescriptionOrNull(FinanceCommandItem command) {
+        String description = firstNonBlank(command.planItemDescription(), command.description(), command.transactionDescription());
+        return description == null || description.isBlank() ? null : description.trim();
     }
 
     private String planDescription(FinanceCommandItem command) {

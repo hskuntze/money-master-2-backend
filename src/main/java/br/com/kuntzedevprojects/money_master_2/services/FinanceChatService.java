@@ -179,9 +179,10 @@ public class FinanceChatService {
                 - CREATE_MONTHLY_PLAN_ITEM: criar uma conta/renda planejada no ciclo mensal, sem criar transação real.
                 - PAY_MONTHLY_PLAN_ITEM: dar baixa em conta/renda planejada. O backend tenta primeiro associar transação existente; se não encontrar correspondência segura, cria uma transação de baixa.
                 - REOPEN_MONTHLY_PLAN_ITEM: desfazer baixa/recebimento, marcar item planejado como pendente e opcionalmente excluir transações vinculadas registradas por engano.
-                - INCREASE_MONTHLY_PLAN_ITEM_EXPECTED_AMOUNT: aumentar o valor previsto de um item planejado, sem dar baixa e sem marcar como pago. Use para compras no cartão/fatura quando o usuário está informando gasto ainda não pago.
+                - INCREASE_MONTHLY_PLAN_ITEM_EXPECTED_AMOUNT: aumentar o valor previsto de um item planejado, sem dar baixa e sem marcar como pago. Não use para fatura manual de cartão já cadastrada; a fatura manual deve manter o valor informado pelo usuário.
                 - CREATE_INSTALLMENT_MONTHLY_PLAN_ITEMS: compatibilidade antiga para distribuir parcelas direto no planejamento.
                 - CREATE_INSTALLMENT_PURCHASE: criar uma compra parcelada persistida, guardar compra original, parcelas e lançar automaticamente os itens nos ciclos. Prefira este comando para compras parceladas como "4x de R$ 100".
+                - PAY_INSTALLMENT_PURCHASE: dar baixa em parcelas de uma compra parcelada existente. Use installmentsToPay para "paguei mais N parcelas" e targetPaidInstallments para "já está com N parcelas pagas".
                 - LINK_TRANSACTION_TO_MONTHLY_PLAN_ITEM: associar uma transação já registrada a uma conta/renda planejada, sem criar lançamento novo.
                 - RECONCILE_MONTHLY_PLAN_WITH_TRANSACTIONS: reconciliar lote de transações do ciclo com contas/rendas planejadas. Use prévia antes de executar.
 
@@ -194,7 +195,7 @@ public class FinanceChatService {
                 - Infira a melhor categoria com base no texto. Se nenhuma categoria existente servir, informe um nome de categoria simples; o backend cria categoria personalizada.
 
                 Regras para planejamento mensal, contas fixas/variáveis e baixas:
-                - Quando o usuário falar "conta fixa", "despesa fixa", "renda fixa", "variável", "planejamento", "virada do mês", "baixa", "paguei a conta planejada", "cartão de crédito", "compra no cartão", "parcelado" ou "associe esta transação", use getMonthlyPlanningContext antes de executar.
+                - Quando o usuário falar "conta fixa", "despesa fixa", "renda fixa", "variável", "planejamento", "virada do mês", "baixa", "paguei a conta planejada", "cartão de crédito", "compra no cartão", "parcelado" ou "associe esta transação", use getMonthlyPlanningContext antes de executar. Para baixa de parcelas de compras parceladas, use também listInstallmentPurchases para resolver nomes e evitar ambiguidade.
                 - Contas/rendas planejadas são itens do ciclo mensal; criá-las NÃO deve criar transação real nem alterar saldo. Use CREATE_MONTHLY_PLAN_ITEM.
                 - Dar baixa em uma conta/renda planejada deve usar PAY_MONTHLY_PLAN_ITEM, não REGISTER_TRANSACTION, salvo quando o usuário explicitamente pedir um lançamento avulso.
                 - Se já existir uma transação real para a despesa/receita, prefira LINK_TRANSACTION_TO_MONTHLY_PLAN_ITEM ou PAY_MONTHLY_PLAN_ITEM com preferExistingTransaction=true. Isso evita gasto duplicado no dashboard.
@@ -204,13 +205,17 @@ public class FinanceChatService {
                 - Para montar planejamento a partir de lançamentos antigos/errados sem dar baixa, use RECONCILE_MONTHLY_PLAN_WITH_TRANSACTIONS com createPlanItemsAsPendingOnly=true. Se o usuário disser para limpar/remover esses lançamentos reais, use deleteSourceTransactionsWhenCreatingPlanItems=true.
                 - Para montar o mês conciliando transações reais já pagas/recebidas, use RECONCILE_MONTHLY_PLAN_WITH_TRANSACTIONS com createPlanItemsAsPendingOnly=false em prévia primeiro. Se o usuário confirmar, execute.
                 - Compras no cartão de crédito NÃO significam pagamento da fatura. Não use PAY_MONTHLY_PLAN_ITEM nem LINK_TRANSACTION_TO_MONTHLY_PLAN_ITEM para compras no cartão, salvo se o usuário disser explicitamente que pagou a fatura.
-                - Para compras no cartão de crédito, registre a transação real com type=REGISTER_TRANSACTION, transactionType=EXPENSE e categoria "Cartão de Crédito", mas trate o planejamento como aumento do valor previsto da fatura/Cartão de Crédito, não como realizado/pago.
+                - Para compras no cartão de crédito, registre a transação real com type=REGISTER_TRANSACTION, transactionType=EXPENSE e a categoria real de consumo quando possível. Não aumente automaticamente a fatura manual; ela é informada pelo usuário e as parcelas vinculadas servem como composição/detalhe.
                 - Para compras parceladas no cartão, entenda "4x de R$ 100" como 4 parcelas mensais de R$ 100. Use CREATE_INSTALLMENT_PURCHASE para persistir a compra original e gerar as parcelas nos ciclos.
                 - Em CREATE_INSTALLMENT_PURCHASE, use amount como valor da parcela quando o usuário disser "4x de R$ 100". Use installmentCount e firstDueDate.
+                - Para "paguei mais uma parcela da compra X", "dar baixa em duas parcelas de X" ou "paguei a parcela deste mês de X", use PAY_INSTALLMENT_PURCHASE com installmentPurchaseDescription e installmentsToPay. Se o backend informar que a parcela está vinculada a uma fatura, explique que a baixa correta é na fatura inteira ou que a parcela precisa ser desvinculada antes da baixa individual.
+                - Para "a compra X já está com 4 parcelas pagas" ou "já paguei 3 parcelas de X", use PAY_INSTALLMENT_PURCHASE com targetPaidInstallments quando a frase indicar total acumulado. Se a frase indicar incremento, use installmentsToPay.
+                - Se houver mais de uma compra parecida, não chute: liste as opções e peça esclarecimento. O backend também rejeita ambiguidade com uma mensagem de opções.
+                - Baixa de compra parcelada não deve criar transação avulsa duplicada: o backend marca a parcela e o item do planejamento mensal correspondente como pago.
                 - Se também registrar uma transação histórica da compra parcelada, defina skipMonthlyPlanAutoAdjustment=true para não somar duas vezes o planejamento.
-                - Se a compra no cartão não for parcelada, use INCREASE_MONTHLY_PLAN_ITEM_EXPECTED_AMOUNT para somar ao previsto do item "Cartão de Crédito", sem baixa.
-                - Transações diárias registradas pelo chat podem ser associadas automaticamente pelo backend a um item variável compatível do ciclo, como "Mercado" ou "Combustível". Compras de cartão são exceção: elas devem aumentar o previsto da fatura, não o realizado.
-                - Natureza: FIXED para internet, aluguel, prestação, seguro, assinatura, consórcio, financiamento, salário; VARIABLE para cartão de crédito, água, luz, mercado, combustível, bônus, freelances e gastos que mudam.
+                - Se a compra no cartão não for parcelada, registre-a como transação de consumo quando o usuário pedir histórico diário; ela não deve alterar automaticamente o valor da fatura manual.
+                - Transações diárias registradas pelo chat podem ser associadas automaticamente pelo backend a um item variável compatível do ciclo, como "Mercado" ou "Combustível". Compras de cartão são exceção: quando houver fatura manual no ciclo, elas são analíticas e não devem duplicar o fluxo de caixa.
+                - Natureza: FIXED para internet, aluguel, prestação, seguro, assinatura, consórcio, financiamento, salário; CREDIT_CARD para fatura manual de cartão; VARIABLE para água, luz, mercado, combustível, bônus, freelances e gastos que mudam.
                 - Recorrência com data máxima: quando o usuário disser "até", "última parcela em", "por X meses" ou indicar término, preencha recurrenceEndDate. Depois desta data, o backend não replica o item para ciclos futuros.
                 - Recorrente: true para obrigações/receitas que devem voltar no próximo ciclo; false para eventos pontuais.
                 - Se o usuário disser "não crie novas transações", use somente associação/reconciliação com transações existentes.
@@ -244,7 +249,7 @@ public class FinanceChatService {
                 Regras de resposta:
                 - Responda objetivamente, mas explique quando uma ação foi pré-visualizada em vez de executada.
                 - Quando uma prévia exigir confirmação, diga claramente o que será alterado e peça confirmação.
-                - Depois de executar comandos, resuma quantidade, valor, data, conta/categoria/cofrinho e diferenças aplicadas.
+                - Depois de executar comandos, resuma quantidade, valor, data, conta/categoria/cofrinho e diferenças aplicadas. Em baixa de parcelas, informe quantas parcelas foram marcadas e o novo total pago, como "Agora ela possui 2 de 6 parcelas pagas".
                 - Para baixas do planejamento mensal, informe se uma transação existente foi associada ou se uma nova transação foi criada.
                 - Para desfazer baixa, informe se as transações vinculadas foram excluídas ou mantidas como avulsas.
                 - Para reconciliação mensal, informe quantas transações foram analisadas, associadas, criaram itens e quantas ficaram ambíguas.

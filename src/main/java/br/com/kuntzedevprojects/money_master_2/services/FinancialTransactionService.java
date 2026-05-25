@@ -23,6 +23,7 @@ import br.com.kuntzedevprojects.money_master_2.entities.FinancialPeriod;
 import br.com.kuntzedevprojects.money_master_2.entities.FinancialTransaction;
 import br.com.kuntzedevprojects.money_master_2.entities.MonthlyPlanItem;
 import br.com.kuntzedevprojects.money_master_2.entities.User;
+import br.com.kuntzedevprojects.money_master_2.enums.MonthlyPlanItemAggregationType;
 import br.com.kuntzedevprojects.money_master_2.enums.MonthlyPlanItemNature;
 import br.com.kuntzedevprojects.money_master_2.enums.MonthlyPlanItemStatus;
 import br.com.kuntzedevprojects.money_master_2.enums.TransactionSource;
@@ -99,6 +100,7 @@ public class FinancialTransactionService {
                 : financialPeriodService.findOwnedPlanItem(ownerEmail, request.monthlyPlanItemId());
 
         if (planItem != null) {
+            ensureNotInvoiceChild(planItem);
             period = planItem.getFinancialPeriod();
             if (category == null) {
                 category = planItem.getCategory();
@@ -152,6 +154,7 @@ public class FinancialTransactionService {
             transaction.setMonthlyPlanItem(null);
         } else if (request.monthlyPlanItemId() != null) {
             MonthlyPlanItem planItem = financialPeriodService.findOwnedPlanItem(ownerEmail, request.monthlyPlanItemId());
+            ensureNotInvoiceChild(planItem);
             TransactionType targetType = request.type() == null ? transaction.getType() : request.type();
             if (planItem.getType() != targetType) {
                 throw new BusinessException("O tipo do lançamento precisa ser igual ao tipo do item planejado.");
@@ -374,23 +377,8 @@ public class FinancialTransactionService {
                 transaction.getType()
         );
         if (isCreditCardPurchase(transaction)) {
-            MonthlyPlanItem cardItem = candidates.stream()
-                    .filter(this::isCreditCardPlanItem)
-                    .findFirst()
-                    .orElse(null);
-            financialPeriodService.increaseMonthlyPlanItemExpectedAmountFromAi(
-                    ownerEmail,
-                    transaction.getType().name(),
-                    cardItem == null ? "Cartão de Crédito" : cardItem.getDescription(),
-                    transaction.getAmount(),
-                    cardItem == null ? transaction.getOccurredOn().toString() : cardItem.getDueDate().toString(),
-                    transaction.getAccount() == null ? null : transaction.getAccount().getName(),
-                    transaction.getCategory() == null ? "Cartão de Crédito" : transaction.getCategory().getName(),
-                    MonthlyPlanItemNature.VARIABLE.name(),
-                    false,
-                    null,
-                    "Compra no cartão lançada como transação avulsa. Valor somado ao previsto, sem baixa automática."
-            );
+            // Fatura manual: compras no cartão não aumentam automaticamente o valor da fatura.
+            // Quando houver fatura no ciclo, a projeção mensal ignora essas transações para não duplicar o fluxo de caixa.
             return;
         }
 
@@ -421,8 +409,11 @@ public class FinancialTransactionService {
         String description = item.getDescription();
         String categoryName = item.getCategory() == null ? "" : item.getCategory().getName();
         return item.getType() == TransactionType.EXPENSE
-                && item.getNature() == MonthlyPlanItemNature.VARIABLE
-                && (containsCreditCardText(description) || containsCreditCardText(categoryName));
+                && item.getStatus() != MonthlyPlanItemStatus.CANCELED
+                && (item.getAggregationType() == MonthlyPlanItemAggregationType.GROUP_PARENT
+                    || item.getNature() == MonthlyPlanItemNature.CREDIT_CARD
+                    || containsCreditCardText(description)
+                    || containsCreditCardText(categoryName));
     }
 
     private boolean containsCreditCardText(String value) {
@@ -431,7 +422,7 @@ public class FinancialTransactionService {
     }
 
     private int minimumAutoAttachScore(MonthlyPlanItem item) {
-        if (item.getNature() == MonthlyPlanItemNature.VARIABLE) {
+        if (item.getNature() == MonthlyPlanItemNature.VARIABLE || item.getNature() == MonthlyPlanItemNature.CREDIT_CARD) {
             return AUTO_ATTACH_VARIABLE_SCORE;
         }
         return AUTO_ATTACH_FIXED_SCORE;
@@ -449,7 +440,7 @@ public class FinancialTransactionService {
             score += 10;
         }
         if (transaction.getCategory() != null && item.getCategory() != null && transaction.getCategory().getId().equals(item.getCategory().getId())) {
-            score += item.getNature() == MonthlyPlanItemNature.VARIABLE ? 45 : 20;
+            score += (item.getNature() == MonthlyPlanItemNature.VARIABLE || item.getNature() == MonthlyPlanItemNature.CREDIT_CARD) ? 45 : 20;
         }
         if (transaction.getAccount() != null && item.getAccount() != null && transaction.getAccount().getId().equals(item.getAccount().getId())) {
             score += 8;
@@ -571,6 +562,12 @@ public class FinancialTransactionService {
             return LocalDate.parse(occurredOnText.trim());
         } catch (Exception ex) {
             throw new BusinessException("A data do lançamento deve estar no formato ISO yyyy-MM-dd.");
+        }
+    }
+
+    private void ensureNotInvoiceChild(MonthlyPlanItem item) {
+        if (item.getAggregationType() == MonthlyPlanItemAggregationType.GROUP_CHILD && item.getParentItem() != null) {
+            throw new BusinessException("Esta parcela está vinculada à fatura \"" + item.getParentItem().getDescription() + "\". Registre a baixa na fatura principal ou desvincule a parcela antes de associar uma transação individual.");
         }
     }
 

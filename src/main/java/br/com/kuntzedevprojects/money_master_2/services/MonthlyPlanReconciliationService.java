@@ -36,7 +36,9 @@ import br.com.kuntzedevprojects.money_master_2.entities.FinancialTransaction;
 import br.com.kuntzedevprojects.money_master_2.entities.MonthlyPlanItem;
 import br.com.kuntzedevprojects.money_master_2.entities.User;
 import br.com.kuntzedevprojects.money_master_2.enums.FinancialPeriodStatus;
+import br.com.kuntzedevprojects.money_master_2.enums.MonthlyPlanItemAggregationType;
 import br.com.kuntzedevprojects.money_master_2.enums.MonthlyPlanItemNature;
+import br.com.kuntzedevprojects.money_master_2.enums.MonthlyPlanItemSettlementOrigin;
 import br.com.kuntzedevprojects.money_master_2.enums.MonthlyPlanItemStatus;
 import br.com.kuntzedevprojects.money_master_2.enums.TransactionSource;
 import br.com.kuntzedevprojects.money_master_2.enums.TransactionType;
@@ -81,6 +83,7 @@ public class MonthlyPlanReconciliationService {
     public MonthlyPlanItemResponse registerPayment(String ownerEmail, Long itemId, MonthlyPlanItemPaymentRequest request) {
         MonthlyPlanItem item = financialPeriodService.findOwnedPlanItem(ownerEmail, itemId);
         ensureCanOperate(item);
+        ensureNotInvoiceChild(item);
         MonthlyPlanItemPaymentRequest safeRequest = request == null
                 ? new MonthlyPlanItemPaymentRequest(null, null, null, null, null, true, null)
                 : request;
@@ -148,6 +151,7 @@ public class MonthlyPlanReconciliationService {
     public MonthlyPlanItemResponse reopenPlanItem(String ownerEmail, Long itemId, MonthlyPlanItemReopenRequest request) {
         MonthlyPlanItem item = financialPeriodService.findOwnedPlanItem(ownerEmail, itemId);
         ensurePeriodEditable(item);
+        ensureNotInvoiceChild(item);
         MonthlyPlanItemReopenRequest safeRequest = request == null
                 ? new MonthlyPlanItemReopenRequest(false, true, null)
                 : request;
@@ -170,6 +174,7 @@ public class MonthlyPlanReconciliationService {
         item.setPaidOn(null);
         item.setStatus(MonthlyPlanItemStatus.PENDING);
         item.setNotes(appendNote(item.getNotes(), safeRequest.notes()));
+        financialPeriodService.synchronizePlanItemPayment(item);
         return MonthlyPlanItemResponse.from(item);
     }
 
@@ -376,6 +381,8 @@ public class MonthlyPlanReconciliationService {
                 expectedAmount == null ? BigDecimal.ZERO : expectedAmount,
                 dueDate,
                 parseNatureOrDefault(natureText),
+                null,
+                null,
                 Boolean.TRUE.equals(recurring),
                 null,
                 MonthlyPlanItemStatus.PENDING,
@@ -563,6 +570,7 @@ public class MonthlyPlanReconciliationService {
         if (!Objects.equals(transaction.getOwner().getEmail().toLowerCase(Locale.ROOT), ownerEmail.toLowerCase(Locale.ROOT))) {
             throw new BusinessException("A transação não pertence ao usuário autenticado.");
         }
+        ensureNotInvoiceChild(item);
         if (item.getType() != transaction.getType()) {
             throw new BusinessException("O tipo da transação precisa ser igual ao tipo do item planejado.");
         }
@@ -625,6 +633,9 @@ public class MonthlyPlanReconciliationService {
         item.setDueDate(clampDate(transaction.getOccurredOn(), period));
         item.setStatus(MonthlyPlanItemStatus.PENDING);
         item.setNature(request.defaultNature() == null ? MonthlyPlanItemNature.VARIABLE : request.defaultNature());
+        item.setAggregationType(MonthlyPlanItemAggregationType.NORMAL);
+        item.setSettlementOrigin(MonthlyPlanItemSettlementOrigin.DIRECT);
+        item.setPaidByParent(false);
         item.setRecurring(Boolean.TRUE.equals(request.recurring()));
         item.setNotes("Criado automaticamente pela conciliação mensal.");
         return planItemRepository.save(item);
@@ -771,6 +782,12 @@ public class MonthlyPlanReconciliationService {
         return nullToZero(item.getExpectedAmount());
     }
 
+    private void ensureNotInvoiceChild(MonthlyPlanItem item) {
+        if (item.getAggregationType() == MonthlyPlanItemAggregationType.GROUP_CHILD && item.getParentItem() != null) {
+            throw new BusinessException("Esta parcela está vinculada à fatura \"" + item.getParentItem().getDescription() + "\". Marque a fatura inteira como paga ou desvincule a parcela antes de dar baixa individual.");
+        }
+    }
+
     private void ensurePeriodEditable(MonthlyPlanItem item) {
         if (item.getFinancialPeriod().getStatus() == FinancialPeriodStatus.CLOSED) {
             throw new BusinessException("Este ciclo financeiro está fechado. Reabra o ciclo antes de alterar associações ou baixas.");
@@ -808,6 +825,7 @@ public class MonthlyPlanReconciliationService {
         return switch (normalized) {
             case "FIXED", "FIXA", "FIXO" -> MonthlyPlanItemNature.FIXED;
             case "VARIABLE", "VARIAVEL", "VARIÁVEL", "VARIAVEIS", "VARIÁVEIS" -> MonthlyPlanItemNature.VARIABLE;
+            case "CREDIT_CARD", "CARTAO", "CARTÃO", "CARTAO_CREDITO", "CARTÃO_CRÉDITO", "FATURA" -> MonthlyPlanItemNature.CREDIT_CARD;
             default -> MonthlyPlanItemNature.valueOf(normalized);
         };
     }

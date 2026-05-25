@@ -90,4 +90,16 @@ public interface FinancialPeriodRepository extends JpaRepository<FinancialPeriod
             @Param("startDate") LocalDate startDate,
             @Param("endDate") LocalDate endDate
     );
+    @Query("""
+            select p
+            from FinancialPeriod p
+            where lower(p.owner.email) = lower(:ownerEmail)
+              and p.startDate > :startDate
+            order by p.startDate asc, p.id asc
+            """)
+    List<FinancialPeriod> findFuturePeriodsAfterStartDate(
+            @Param("ownerEmail") String ownerEmail,
+            @Param("startDate") LocalDate startDate
+    );
+
 }

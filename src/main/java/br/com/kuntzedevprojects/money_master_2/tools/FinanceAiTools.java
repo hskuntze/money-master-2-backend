@@ -24,6 +24,7 @@ import br.com.kuntzedevprojects.money_master_2.dtos.finance.FinancialTransaction
 import br.com.kuntzedevprojects.money_master_2.dtos.finance.MonthlyPeriodSummaryResponse;
 import br.com.kuntzedevprojects.money_master_2.dtos.finance.MonthlyPlanItemResponse;
 import br.com.kuntzedevprojects.money_master_2.dtos.finance.MonthlyPlanningContextResponse;
+import br.com.kuntzedevprojects.money_master_2.dtos.installments.InstallmentPurchaseResponse;
 import br.com.kuntzedevprojects.money_master_2.dtos.savingsjar.SavingsJarResponse;
 import br.com.kuntzedevprojects.money_master_2.dtos.savingsjar.SavingsJarSummaryResponse;
 import br.com.kuntzedevprojects.money_master_2.enums.TransactionType;
@@ -35,6 +36,7 @@ import br.com.kuntzedevprojects.money_master_2.services.FinancialReportService;
 import br.com.kuntzedevprojects.money_master_2.services.FinancialPeriodService;
 import br.com.kuntzedevprojects.money_master_2.services.MonthlyPlanReconciliationService;
 import br.com.kuntzedevprojects.money_master_2.services.FinancialTransactionService;
+import br.com.kuntzedevprojects.money_master_2.services.InstallmentPurchaseService;
 import br.com.kuntzedevprojects.money_master_2.services.SavingsJarService;
 
 @Component
@@ -49,6 +51,7 @@ public class FinanceAiTools {
     private final FinanceCommandExecutor commandExecutor;
     private final FinancialPeriodService financialPeriodService;
     private final MonthlyPlanReconciliationService reconciliationService;
+    private final InstallmentPurchaseService installmentPurchaseService;
 
     public FinanceAiTools(
             CurrentUserService currentUserService,
@@ -59,7 +62,8 @@ public class FinanceAiTools {
             SavingsJarService savingsJarService,
             FinanceCommandExecutor commandExecutor,
             FinancialPeriodService financialPeriodService,
-            MonthlyPlanReconciliationService reconciliationService
+            MonthlyPlanReconciliationService reconciliationService,
+            InstallmentPurchaseService installmentPurchaseService
     ) {
         this.currentUserService = currentUserService;
         this.accountService = accountService;
@@ -70,6 +74,7 @@ public class FinanceAiTools {
         this.commandExecutor = commandExecutor;
         this.financialPeriodService = financialPeriodService;
         this.reconciliationService = reconciliationService;
+        this.installmentPurchaseService = installmentPurchaseService;
     }
 
 
@@ -97,6 +102,12 @@ public class FinanceAiTools {
                 ? reconciliationService.listUnlinkedTransactions(ownerEmail, selectedPeriod.id(), null)
                 : List.of();
         return new MonthlyPlanningContextResponse(selectedPeriod, periods, summary, items, unlinkedTransactions, Instant.now());
+    }
+
+
+    @Tool(description = "Lista compras parceladas do usuário autenticado, com parcelas, status, quantas parcelas foram pagas e quantas ainda estão pendentes. Use antes de dar baixa em parcelas por linguagem natural quando houver nome livre ou possibilidade de ambiguidade.")
+    public List<InstallmentPurchaseResponse> listInstallmentPurchases() {
+        return installmentPurchaseService.list(currentUserService.currentEmail());
     }
 
     @Tool(description = "Gera uma prévia de comandos financeiros estruturados sem alterar o banco. Use para operações em lote, alterações potencialmente ambíguas ou quando quiser validar antes de executar. O usuário pode confirmar no próximo turno.")

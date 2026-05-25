@@ -5,6 +5,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 
 import br.com.kuntzedevprojects.money_master_2.enums.InstallmentEntryStatus;
+import br.com.kuntzedevprojects.money_master_2.enums.InstallmentPaymentSource;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -23,157 +24,208 @@ import jakarta.persistence.UniqueConstraint;
 
 @Entity
 @Table(name = "tb_installment_purchase_entry", indexes = {
-		@Index(name = "idx_installment_entry_owner_due", columnList = "owner_id,due_date"),
-		@Index(name = "idx_installment_entry_period", columnList = "financial_period_id"),
-		@Index(name = "idx_installment_entry_plan_item", columnList = "monthly_plan_item_id") }, uniqueConstraints = {
-				@UniqueConstraint(name = "uk_installment_entry_purchase_number", columnNames = { "purchase_id",
-						"installment_number" }) })
+        @Index(name = "idx_installment_entry_owner_due", columnList = "owner_id,due_date"),
+        @Index(name = "idx_installment_entry_period", columnList = "financial_period_id"),
+        @Index(name = "idx_installment_entry_plan_item", columnList = "monthly_plan_item_id"),
+        @Index(name = "idx_installment_entry_status_source", columnList = "status,payment_source") }, uniqueConstraints = {
+                @UniqueConstraint(name = "uk_installment_entry_purchase_number", columnNames = { "purchase_id",
+                        "installment_number" }) })
 public class InstallmentPurchaseEntry {
 
-	@Id
-	@GeneratedValue(strategy = GenerationType.IDENTITY)
-	private Long id;
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
 
-	@ManyToOne(fetch = FetchType.LAZY, optional = false)
-	@JoinColumn(name = "owner_id", nullable = false)
-	private User owner;
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "owner_id", nullable = false)
+    private User owner;
 
-	@ManyToOne(fetch = FetchType.LAZY, optional = false)
-	@JoinColumn(name = "purchase_id", nullable = false)
-	private InstallmentPurchase purchase;
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "purchase_id", nullable = false)
+    private InstallmentPurchase purchase;
 
-	@ManyToOne(fetch = FetchType.LAZY, optional = false)
-	@JoinColumn(name = "financial_period_id", nullable = false)
-	private FinancialPeriod financialPeriod;
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "financial_period_id", nullable = false)
+    private FinancialPeriod financialPeriod;
 
-	@ManyToOne(fetch = FetchType.LAZY)
-	@JoinColumn(name = "monthly_plan_item_id")
-	private MonthlyPlanItem monthlyPlanItem;
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "monthly_plan_item_id")
+    private MonthlyPlanItem monthlyPlanItem;
 
-	@Column(nullable = false)
-	private Integer installmentNumber;
+    @Column(nullable = false)
+    private Integer installmentNumber;
 
-	@Column(nullable = false)
-	private LocalDate dueDate;
+    @Column(nullable = false)
+    private LocalDate dueDate;
 
-	@Column(nullable = false, precision = 15, scale = 2)
-	private BigDecimal amount = BigDecimal.ZERO;
+    @Column(nullable = false, precision = 15, scale = 2)
+    private BigDecimal amount = BigDecimal.ZERO;
 
-	@Enumerated(EnumType.STRING)
-	@Column(nullable = false, length = 30)
-	private InstallmentEntryStatus status = InstallmentEntryStatus.PENDING;
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 30)
+    private InstallmentEntryStatus status = InstallmentEntryStatus.PENDING;
 
-	@Column(length = 2000)
-	private String notes;
+    private LocalDate paidOn;
 
-	@Column(nullable = false, updatable = false)
-	private Instant createdAt;
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 30)
+    private InstallmentPaymentSource paymentSource = InstallmentPaymentSource.NONE;
 
-	private Instant updatedAt;
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "paid_by_id")
+    private User paidBy;
 
-	@PrePersist
-	void prePersist() {
-		this.createdAt = Instant.now();
-	}
+    private Instant paymentRegisteredAt;
 
-	@PreUpdate
-	void preUpdate() {
-		this.updatedAt = Instant.now();
-	}
+    @Column(length = 2000)
+    private String notes;
 
-	public Long getId() {
-		return id;
-	}
+    @Column(nullable = false, updatable = false)
+    private Instant createdAt;
 
-	public void setId(Long id) {
-		this.id = id;
-	}
+    private Instant updatedAt;
 
-	public User getOwner() {
-		return owner;
-	}
+    @PrePersist
+    void prePersist() {
+        this.createdAt = Instant.now();
+        if (this.paymentSource == null) {
+            this.paymentSource = InstallmentPaymentSource.NONE;
+        }
+    }
 
-	public void setOwner(User owner) {
-		this.owner = owner;
-	}
+    @PreUpdate
+    void preUpdate() {
+        this.updatedAt = Instant.now();
+        if (this.paymentSource == null) {
+            this.paymentSource = InstallmentPaymentSource.NONE;
+        }
+    }
 
-	public InstallmentPurchase getPurchase() {
-		return purchase;
-	}
+    public Long getId() {
+        return id;
+    }
 
-	public void setPurchase(InstallmentPurchase purchase) {
-		this.purchase = purchase;
-	}
+    public void setId(Long id) {
+        this.id = id;
+    }
 
-	public FinancialPeriod getFinancialPeriod() {
-		return financialPeriod;
-	}
+    public User getOwner() {
+        return owner;
+    }
 
-	public void setFinancialPeriod(FinancialPeriod financialPeriod) {
-		this.financialPeriod = financialPeriod;
-	}
+    public void setOwner(User owner) {
+        this.owner = owner;
+    }
 
-	public MonthlyPlanItem getMonthlyPlanItem() {
-		return monthlyPlanItem;
-	}
+    public InstallmentPurchase getPurchase() {
+        return purchase;
+    }
 
-	public void setMonthlyPlanItem(MonthlyPlanItem monthlyPlanItem) {
-		this.monthlyPlanItem = monthlyPlanItem;
-	}
+    public void setPurchase(InstallmentPurchase purchase) {
+        this.purchase = purchase;
+    }
 
-	public Integer getInstallmentNumber() {
-		return installmentNumber;
-	}
+    public FinancialPeriod getFinancialPeriod() {
+        return financialPeriod;
+    }
 
-	public void setInstallmentNumber(Integer installmentNumber) {
-		this.installmentNumber = installmentNumber;
-	}
+    public void setFinancialPeriod(FinancialPeriod financialPeriod) {
+        this.financialPeriod = financialPeriod;
+    }
 
-	public LocalDate getDueDate() {
-		return dueDate;
-	}
+    public MonthlyPlanItem getMonthlyPlanItem() {
+        return monthlyPlanItem;
+    }
 
-	public void setDueDate(LocalDate dueDate) {
-		this.dueDate = dueDate;
-	}
+    public void setMonthlyPlanItem(MonthlyPlanItem monthlyPlanItem) {
+        this.monthlyPlanItem = monthlyPlanItem;
+    }
 
-	public BigDecimal getAmount() {
-		return amount;
-	}
+    public Integer getInstallmentNumber() {
+        return installmentNumber;
+    }
 
-	public void setAmount(BigDecimal amount) {
-		this.amount = amount;
-	}
+    public void setInstallmentNumber(Integer installmentNumber) {
+        this.installmentNumber = installmentNumber;
+    }
 
-	public InstallmentEntryStatus getStatus() {
-		return status;
-	}
+    public LocalDate getDueDate() {
+        return dueDate;
+    }
 
-	public void setStatus(InstallmentEntryStatus status) {
-		this.status = status;
-	}
+    public void setDueDate(LocalDate dueDate) {
+        this.dueDate = dueDate;
+    }
 
-	public String getNotes() {
-		return notes;
-	}
+    public BigDecimal getAmount() {
+        return amount;
+    }
 
-	public void setNotes(String notes) {
-		this.notes = notes;
-	}
+    public void setAmount(BigDecimal amount) {
+        this.amount = amount;
+    }
 
-	public Instant getCreatedAt() {
-		return createdAt;
-	}
+    public InstallmentEntryStatus getStatus() {
+        return status;
+    }
 
-	public void setCreatedAt(Instant createdAt) {
-		this.createdAt = createdAt;
-	}
+    public void setStatus(InstallmentEntryStatus status) {
+        this.status = status;
+    }
 
-	public Instant getUpdatedAt() {
-		return updatedAt;
-	}
+    public LocalDate getPaidOn() {
+        return paidOn;
+    }
 
-	public void setUpdatedAt(Instant updatedAt) {
-		this.updatedAt = updatedAt;
-	}
+    public void setPaidOn(LocalDate paidOn) {
+        this.paidOn = paidOn;
+    }
+
+    public InstallmentPaymentSource getPaymentSource() {
+        return paymentSource;
+    }
+
+    public void setPaymentSource(InstallmentPaymentSource paymentSource) {
+        this.paymentSource = paymentSource;
+    }
+
+    public User getPaidBy() {
+        return paidBy;
+    }
+
+    public void setPaidBy(User paidBy) {
+        this.paidBy = paidBy;
+    }
+
+    public Instant getPaymentRegisteredAt() {
+        return paymentRegisteredAt;
+    }
+
+    public void setPaymentRegisteredAt(Instant paymentRegisteredAt) {
+        this.paymentRegisteredAt = paymentRegisteredAt;
+    }
+
+    public String getNotes() {
+        return notes;
+    }
+
+    public void setNotes(String notes) {
+        this.notes = notes;
+    }
+
+    public Instant getCreatedAt() {
+        return createdAt;
+    }
+
+    public void setCreatedAt(Instant createdAt) {
+        this.createdAt = createdAt;
+    }
+
+    public Instant getUpdatedAt() {
+        return updatedAt;
+    }
+
+    public void setUpdatedAt(Instant updatedAt) {
+        this.updatedAt = updatedAt;
+    }
 }

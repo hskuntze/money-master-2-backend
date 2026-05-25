@@ -144,6 +144,34 @@ public class FinancialPeriodController {
         return ResponseEntity.ok(new MessageResponse("Item do planejamento cancelado com sucesso."));
     }
 
+    @GetMapping("/plan-items/{invoiceItemId}/child-candidates")
+    @PreAuthorize("hasAuthority('FINANCE_READ')")
+    public ResponseEntity<List<MonthlyPlanItemResponse>> listInvoiceChildCandidates(
+            @PathVariable Long invoiceItemId,
+            Principal principal
+    ) {
+        return ResponseEntity.ok(financialPeriodService.listInvoiceChildCandidates(principal.getName(), invoiceItemId));
+    }
+
+    @PostMapping("/plan-items/{invoiceItemId}/children/{childItemId}")
+    @PreAuthorize("hasAuthority('FINANCE_MANAGE')")
+    public ResponseEntity<MonthlyPlanItemResponse> linkPlanItemToInvoice(
+            @PathVariable Long invoiceItemId,
+            @PathVariable Long childItemId,
+            Principal principal
+    ) {
+        return ResponseEntity.ok(financialPeriodService.linkPlanItemToInvoice(principal.getName(), invoiceItemId, childItemId));
+    }
+
+    @DeleteMapping("/plan-items/{childItemId}/parent")
+    @PreAuthorize("hasAuthority('FINANCE_MANAGE')")
+    public ResponseEntity<MonthlyPlanItemResponse> unlinkPlanItemFromInvoice(
+            @PathVariable Long childItemId,
+            Principal principal
+    ) {
+        return ResponseEntity.ok(financialPeriodService.unlinkPlanItemFromInvoice(principal.getName(), childItemId));
+    }
+
 
     @PostMapping("/plan-items/{itemId}/payments")
     @PreAuthorize("hasAuthority('FINANCE_MANAGE')")

@@ -3,6 +3,7 @@ package br.com.kuntzedevprojects.money_master_2.dtos.finance;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 
+import br.com.kuntzedevprojects.money_master_2.enums.MonthlyPlanItemAggregationType;
 import br.com.kuntzedevprojects.money_master_2.enums.MonthlyPlanItemNature;
 import br.com.kuntzedevprojects.money_master_2.enums.MonthlyPlanItemStatus;
 import br.com.kuntzedevprojects.money_master_2.enums.TransactionType;
@@ -26,6 +27,8 @@ public record MonthlyPlanItemUpdateRequest(
         LocalDate dueDate,
         LocalDate paidOn,
         MonthlyPlanItemNature nature,
+        MonthlyPlanItemAggregationType aggregationType,
+        Long parentItemId,
         Boolean recurring,
         LocalDate recurrenceEndDate,
         MonthlyPlanItemStatus status,
