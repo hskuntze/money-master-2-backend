@@ -12,12 +12,14 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import br.com.kuntzedevprojects.money_master_2.dtos.auth.AuthLoginRequest;
+import br.com.kuntzedevprojects.money_master_2.dtos.auth.AuthLogoutRequest;
 import br.com.kuntzedevprojects.money_master_2.dtos.auth.AuthRefreshRequest;
 import br.com.kuntzedevprojects.money_master_2.dtos.auth.AuthRegisterRequest;
 import br.com.kuntzedevprojects.money_master_2.dtos.auth.AuthResponse;
 import br.com.kuntzedevprojects.money_master_2.dtos.auth.MessageResponse;
 import br.com.kuntzedevprojects.money_master_2.dtos.user.UserResponse;
 import br.com.kuntzedevprojects.money_master_2.services.AuthService;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 
 @RestController
@@ -32,20 +34,31 @@ public class AuthController {
 
     @PostMapping("/register")
     @PreAuthorize("permitAll()")
-    public ResponseEntity<UserResponse> register(@Valid @RequestBody AuthRegisterRequest request) {
-        return ResponseEntity.ok(authService.register(request));
+    public ResponseEntity<UserResponse> register(@Valid @RequestBody AuthRegisterRequest request, HttpServletRequest servletRequest) {
+        return ResponseEntity.ok(authService.register(request, servletRequest));
     }
 
     @PostMapping("/login")
     @PreAuthorize("permitAll()")
-    public ResponseEntity<AuthResponse> login(@Valid @RequestBody AuthLoginRequest request) {
-        return ResponseEntity.ok(authService.login(request));
+    public ResponseEntity<AuthResponse> login(@Valid @RequestBody AuthLoginRequest request, HttpServletRequest servletRequest) {
+        return ResponseEntity.ok(authService.login(request, servletRequest));
     }
 
     @PostMapping("/refresh")
     @PreAuthorize("permitAll()")
-    public ResponseEntity<AuthResponse> refresh(@Valid @RequestBody AuthRefreshRequest request) {
-        return ResponseEntity.ok(authService.refresh(request));
+    public ResponseEntity<AuthResponse> refresh(@Valid @RequestBody AuthRefreshRequest request, HttpServletRequest servletRequest) {
+        return ResponseEntity.ok(authService.refresh(request, servletRequest));
+    }
+
+    @PostMapping("/logout")
+    @PreAuthorize("permitAll()")
+    public ResponseEntity<MessageResponse> logout(
+            @Valid @RequestBody(required = false) AuthLogoutRequest request,
+            Principal principal,
+            HttpServletRequest servletRequest
+    ) {
+        authService.logout(request == null ? null : request.refreshToken(), principal == null ? null : principal.getName(), servletRequest);
+        return ResponseEntity.ok(new MessageResponse("Logout realizado com sucesso."));
     }
 
     @GetMapping("/confirm-email")
@@ -57,9 +70,9 @@ public class AuthController {
 
     @PostMapping("/resend-confirmation")
     @PreAuthorize("permitAll()")
-    public ResponseEntity<MessageResponse> resendConfirmation(@RequestParam String email) {
-        authService.resendConfirmation(email);
-        return ResponseEntity.ok(new MessageResponse("E-mail de confirmação reenviado."));
+    public ResponseEntity<MessageResponse> resendConfirmation(@RequestParam String email, HttpServletRequest servletRequest) {
+        authService.resendConfirmation(email, servletRequest);
+        return ResponseEntity.ok(new MessageResponse("Se o e-mail estiver cadastrado e pendente de confirmação, enviaremos uma nova mensagem."));
     }
 
     @GetMapping("/me")

@@ -386,6 +386,7 @@ public class MonthlyPlanReconciliationService {
                 Boolean.TRUE.equals(recurring),
                 null,
                 MonthlyPlanItemStatus.PENDING,
+                null,
                 notes
         );
         return financialPeriodService.createPlanItem(ownerEmail, period.getId(), request);

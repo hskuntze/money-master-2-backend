@@ -5,6 +5,7 @@ import java.time.LocalDate;
 
 import br.com.kuntzedevprojects.money_master_2.enums.MonthlyPlanItemAggregationType;
 import br.com.kuntzedevprojects.money_master_2.enums.MonthlyPlanItemNature;
+import br.com.kuntzedevprojects.money_master_2.enums.MonthlyPlanItemInvoiceContributionMode;
 import br.com.kuntzedevprojects.money_master_2.enums.MonthlyPlanItemStatus;
 import br.com.kuntzedevprojects.money_master_2.enums.TransactionType;
 import jakarta.validation.constraints.DecimalMin;
@@ -32,6 +33,7 @@ public record MonthlyPlanItemUpdateRequest(
         Boolean recurring,
         LocalDate recurrenceEndDate,
         MonthlyPlanItemStatus status,
+        MonthlyPlanItemInvoiceContributionMode invoiceContributionMode,
 
         @Size(max = 2000, message = "As observações devem ter no máximo 2000 caracteres.")
         String notes

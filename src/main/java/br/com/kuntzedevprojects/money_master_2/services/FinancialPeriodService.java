@@ -21,6 +21,7 @@ import br.com.kuntzedevprojects.money_master_2.dtos.finance.FinancialPeriodTurno
 import br.com.kuntzedevprojects.money_master_2.dtos.finance.FinancialPeriodUpdateRequest;
 import br.com.kuntzedevprojects.money_master_2.dtos.finance.MonthlyPeriodSummaryResponse;
 import br.com.kuntzedevprojects.money_master_2.dtos.finance.MonthlyPlanItemCreateRequest;
+import br.com.kuntzedevprojects.money_master_2.dtos.finance.MonthlyPlanItemInvoiceLinkRequest;
 import br.com.kuntzedevprojects.money_master_2.dtos.finance.MonthlyPlanItemResponse;
 import br.com.kuntzedevprojects.money_master_2.dtos.finance.MonthlyPlanItemUpdateRequest;
 import br.com.kuntzedevprojects.money_master_2.entities.Account;
@@ -34,6 +35,7 @@ import br.com.kuntzedevprojects.money_master_2.enums.FinancialPeriodStatus;
 import br.com.kuntzedevprojects.money_master_2.enums.InstallmentEntryStatus;
 import br.com.kuntzedevprojects.money_master_2.enums.InstallmentPaymentSource;
 import br.com.kuntzedevprojects.money_master_2.enums.MonthlyPlanItemAggregationType;
+import br.com.kuntzedevprojects.money_master_2.enums.MonthlyPlanItemInvoiceContributionMode;
 import br.com.kuntzedevprojects.money_master_2.enums.MonthlyPlanItemNature;
 import br.com.kuntzedevprojects.money_master_2.enums.MonthlyPlanItemSettlementOrigin;
 import br.com.kuntzedevprojects.money_master_2.enums.MonthlyPlanItemStatus;
@@ -44,6 +46,7 @@ import br.com.kuntzedevprojects.money_master_2.repositories.FinancialPeriodRepos
 import br.com.kuntzedevprojects.money_master_2.repositories.FinancialTransactionRepository;
 import br.com.kuntzedevprojects.money_master_2.repositories.InstallmentPurchaseEntryRepository;
 import br.com.kuntzedevprojects.money_master_2.repositories.MonthlyPlanItemRepository;
+import br.com.kuntzedevprojects.money_master_2.repositories.PaymentRepository;
 
 @Service
 public class FinancialPeriodService {
@@ -54,26 +57,32 @@ public class FinancialPeriodService {
     private final MonthlyPlanItemRepository planItemRepository;
     private final FinancialTransactionRepository transactionRepository;
     private final InstallmentPurchaseEntryRepository installmentEntryRepository;
+    private final PaymentRepository paymentRepository;
     private final CurrentUserService currentUserService;
     private final AccountService accountService;
     private final CategoryService categoryService;
+    private final MonthlyPeriodSummaryCalculator summaryCalculator;
 
     public FinancialPeriodService(
             FinancialPeriodRepository periodRepository,
             MonthlyPlanItemRepository planItemRepository,
             FinancialTransactionRepository transactionRepository,
             InstallmentPurchaseEntryRepository installmentEntryRepository,
+            PaymentRepository paymentRepository,
             CurrentUserService currentUserService,
             AccountService accountService,
-            CategoryService categoryService
+            CategoryService categoryService,
+            MonthlyPeriodSummaryCalculator summaryCalculator
     ) {
         this.periodRepository = periodRepository;
         this.planItemRepository = planItemRepository;
         this.transactionRepository = transactionRepository;
         this.installmentEntryRepository = installmentEntryRepository;
+        this.paymentRepository = paymentRepository;
         this.currentUserService = currentUserService;
         this.accountService = accountService;
         this.categoryService = categoryService;
+        this.summaryCalculator = summaryCalculator;
     }
 
     @Transactional(readOnly = true)
@@ -200,7 +209,6 @@ public class FinancialPeriodService {
     public MonthlyPeriodSummaryResponse summary(String ownerEmail, Long periodId) {
         FinancialPeriod period = findOwnedPeriod(ownerEmail, periodId);
         List<MonthlyPlanItem> items = planItemRepository.findByOwnerEmailAndPeriod(ownerEmail, period.getId(), null);
-
         List<FinancialTransaction> transactions = transactionRepository.search(
                 ownerEmail,
                 period.getStartDate(),
@@ -211,43 +219,7 @@ public class FinancialPeriodService {
                 period.getId(),
                 null
         );
-
-        BigDecimal plannedIncome = sumExpected(items, TransactionType.INCOME);
-        BigDecimal plannedExpense = sumExpected(items, TransactionType.EXPENSE);
-        BigDecimal paidIncome = sumActual(items, TransactionType.INCOME);
-        BigDecimal paidExpense = sumActual(items, TransactionType.EXPENSE);
-        BigDecimal realizedIncomeSafe = sumTransactions(transactions, TransactionType.INCOME);
-        BigDecimal realizedExpenseSafe = sumTransactions(transactions, TransactionType.EXPENSE);
-        BigDecimal pendingIncome = plannedIncome.subtract(paidIncome).max(BigDecimal.ZERO).setScale(2, RoundingMode.HALF_UP);
-        BigDecimal pendingExpense = plannedExpense.subtract(paidExpense).max(BigDecimal.ZERO).setScale(2, RoundingMode.HALF_UP);
-
-        BigDecimal plannedAvailable = plannedIncome.subtract(plannedExpense).setScale(2, RoundingMode.HALF_UP);
-        BigDecimal unplannedIncome = sumUnplannedProjectedImpact(transactions, items, TransactionType.INCOME);
-        BigDecimal unplannedExpense = sumUnplannedProjectedImpact(transactions, items, TransactionType.EXPENSE);
-        BigDecimal projectedAvailable = plannedAvailable
-                .add(unplannedIncome)
-                .subtract(unplannedExpense)
-                .setScale(2, RoundingMode.HALF_UP);
-        long pendingItems = items.stream().filter(this::includedInMainTotals).filter(item -> item.getStatus() == MonthlyPlanItemStatus.PENDING || item.getStatus() == MonthlyPlanItemStatus.PARTIALLY_PAID).count();
-        long paidItems = items.stream().filter(this::includedInMainTotals).filter(item -> item.getStatus() == MonthlyPlanItemStatus.PAID).count();
-
-        return new MonthlyPeriodSummaryResponse(
-                FinancialPeriodResponse.from(period),
-                plannedIncome,
-                plannedExpense,
-                paidIncome,
-                paidExpense,
-                pendingIncome,
-                pendingExpense,
-                realizedIncomeSafe,
-                realizedExpenseSafe,
-                plannedAvailable,
-                unplannedIncome,
-                unplannedExpense,
-                projectedAvailable,
-                pendingItems,
-                paidItems
-        );
+        return summaryCalculator.calculate(period, items, transactions);
     }
 
     @Transactional(readOnly = true)
@@ -299,8 +271,14 @@ public class FinancialPeriodService {
         item.setDueDate(request.dueDate());
         item.setNature(resolveNature(request.nature(), aggregationType));
         item.setAggregationType(aggregationType);
-        if (aggregationType == MonthlyPlanItemAggregationType.GROUP_PARENT && item.getType() != TransactionType.EXPENSE) {
-            throw new BusinessException("A fatura manual precisa ser um item de despesa.");
+        item.setInvoiceContributionMode(resolveInvoiceContributionMode(request.invoiceContributionMode(), aggregationType));
+        if (aggregationType == MonthlyPlanItemAggregationType.GROUP_PARENT) {
+            if (item.getType() != TransactionType.EXPENSE) {
+                throw new BusinessException("A fatura manual precisa ser um item de despesa.");
+            }
+            item.setInvoiceBaseAmount(item.getExpectedAmount());
+        } else {
+            item.setInvoiceBaseAmount(null);
         }
         item.setSettlementOrigin(MonthlyPlanItemSettlementOrigin.DIRECT);
         item.setPaidByParent(false);
@@ -308,6 +286,7 @@ public class FinancialPeriodService {
             validateParentChildRelationship(parent, item);
             item.setParentItem(parent);
             item.setAggregationType(MonthlyPlanItemAggregationType.GROUP_CHILD);
+            item.setInvoiceContributionMode(resolveInvoiceContributionMode(request.invoiceContributionMode(), MonthlyPlanItemAggregationType.GROUP_CHILD));
         }
         item.setRecurring(item.getAggregationType() == MonthlyPlanItemAggregationType.GROUP_CHILD ? false : Boolean.TRUE.equals(request.recurring()));
         item.setRecurrenceEndDate(validateRecurrenceEndDate(item.isRecurring(), request.recurrenceEndDate(), item.getDueDate()));
@@ -320,6 +299,10 @@ public class FinancialPeriodService {
 
         MonthlyPlanItem saved = planItemRepository.save(item);
         initializeRecurringMetadata(saved);
+        if (parent != null) {
+            synchronizeInvoiceTotal(parent);
+            synchronizeChildrenWithParentPayment(parent);
+        }
         propagateRecurringPlanItemToExistingFuturePeriods(ownerEmail, saved);
         return MonthlyPlanItemResponse.from(saved);
     }
@@ -329,6 +312,8 @@ public class FinancialPeriodService {
         MonthlyPlanItem item = findOwnedPlanItem(ownerEmail, itemId);
         ensurePlanningEditable(item.getFinancialPeriod());
 
+        MonthlyPlanItem previousParent = item.getParentItem();
+        MonthlyPlanItemAggregationType targetAggregationType = resolveTargetAggregationType(item, request.aggregationType(), request.parentItemId());
         boolean generatedOccurrence = isGeneratedRecurringOccurrence(item);
         TransactionType targetType = request.type() == null ? item.getType() : request.type();
         if (request.accountId() != null) {
@@ -347,7 +332,12 @@ public class FinancialPeriodService {
             item.setDescription(request.description().trim());
         }
         if (request.expectedAmount() != null) {
-            item.setExpectedAmount(normalizeZeroOrPositive(request.expectedAmount()));
+            BigDecimal normalizedExpected = normalizeZeroOrPositive(request.expectedAmount());
+            if (targetAggregationType == MonthlyPlanItemAggregationType.GROUP_PARENT) {
+                item.setInvoiceBaseAmount(normalizedExpected);
+            } else {
+                item.setExpectedAmount(normalizedExpected);
+            }
         }
         if (request.actualAmount() != null) {
             item.setActualAmount(normalizeZeroOrPositive(request.actualAmount()));
@@ -364,7 +354,8 @@ public class FinancialPeriodService {
             item.setNature(request.nature());
         }
 
-        applyRequestedHierarchy(ownerEmail, item, request.aggregationType(), request.parentItemId());
+        applyRequestedHierarchy(ownerEmail, item, request.aggregationType(), request.parentItemId(), request.invoiceContributionMode());
+        applyInvoiceFieldsAfterHierarchy(item, request.invoiceContributionMode());
 
         if (request.recurring() != null) {
             item.setRecurring(item.getAggregationType() == MonthlyPlanItemAggregationType.GROUP_CHILD ? false : request.recurring());
@@ -400,10 +391,19 @@ public class FinancialPeriodService {
         if (generatedOccurrence) {
             item.setRecurrenceModifiedManually(true);
         }
-        recalculatePlanItemStatus(item);
         if (item.getAggregationType() == MonthlyPlanItemAggregationType.GROUP_PARENT) {
+            synchronizeInvoiceTotal(item);
             synchronizeChildrenWithParentPayment(item);
         }
+        if (previousParent != null && !Objects.equals(previousParent.getId(), item.getParentItem() == null ? null : item.getParentItem().getId())) {
+            synchronizeInvoiceTotal(previousParent);
+            synchronizeChildrenWithParentPayment(previousParent);
+        }
+        if (item.getParentItem() != null) {
+            synchronizeInvoiceTotal(item.getParentItem());
+            synchronizeChildrenWithParentPayment(item.getParentItem());
+        }
+        recalculatePlanItemStatus(item);
         initializeRecurringMetadata(item);
         propagateRecurringPlanItemToExistingFuturePeriods(ownerEmail, item);
         return MonthlyPlanItemResponse.from(item);
@@ -420,14 +420,27 @@ public class FinancialPeriodService {
             }
         }
         item.setStatus(MonthlyPlanItemStatus.CANCELED);
+        if (item.getParentItem() != null) {
+            synchronizeInvoiceTotal(item.getParentItem());
+            synchronizeChildrenWithParentPayment(item.getParentItem());
+        }
     }
 
     @Transactional
-    public MonthlyPlanItemResponse linkPlanItemToInvoice(String ownerEmail, Long invoiceItemId, Long childItemId) {
+    public MonthlyPlanItemResponse linkPlanItemToInvoice(String ownerEmail, Long invoiceItemId, Long childItemId, MonthlyPlanItemInvoiceLinkRequest request) {
         MonthlyPlanItem invoice = findOwnedPlanItem(ownerEmail, invoiceItemId);
         MonthlyPlanItem child = findOwnedPlanItem(ownerEmail, childItemId);
+        MonthlyPlanItem previousParent = child.getParentItem();
         ensurePlanningEditable(invoice.getFinancialPeriod());
-        linkChildToParent(invoice, child);
+        if (previousParent != null) {
+            ensurePlanningEditable(previousParent.getFinancialPeriod());
+        }
+        linkChildToParent(invoice, child, request == null ? null : request.invoiceContributionMode());
+        if (previousParent != null && !Objects.equals(previousParent.getId(), invoice.getId())) {
+            synchronizeInvoiceTotal(previousParent);
+            synchronizeChildrenWithParentPayment(previousParent);
+        }
+        synchronizeInvoiceTotal(invoice);
         synchronizeChildrenWithParentPayment(invoice);
         return toSingleTreeResponse(ownerEmail, invoice.getId());
     }
@@ -442,6 +455,8 @@ public class FinancialPeriodService {
         }
         child.setParentItem(null);
         child.setAggregationType(MonthlyPlanItemAggregationType.NORMAL);
+        child.setInvoiceContributionMode(MonthlyPlanItemInvoiceContributionMode.COMPOSITION_ONLY);
+        child.setInvoiceBaseAmount(null);
         if (child.isPaidByParent()) {
             child.setActualAmount(BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP));
             child.setPaidOn(null);
@@ -449,6 +464,8 @@ public class FinancialPeriodService {
         }
         child.setPaidByParent(false);
         child.setSettlementOrigin(MonthlyPlanItemSettlementOrigin.DIRECT);
+        synchronizeInvoiceTotal(parent);
+        synchronizeChildrenWithParentPayment(parent);
         return MonthlyPlanItemResponse.from(child);
     }
 
@@ -553,6 +570,13 @@ public class FinancialPeriodService {
         if (notes != null && !notes.isBlank()) {
             item.setNotes(appendNote(item.getNotes(), notes));
         }
+        if (item.getAggregationType() == MonthlyPlanItemAggregationType.GROUP_PARENT) {
+            synchronizeInvoiceTotal(item);
+        }
+        if (item.getParentItem() != null) {
+            synchronizeInvoiceTotal(item.getParentItem());
+            synchronizeChildrenWithParentPayment(item.getParentItem());
+        }
         recalculatePlanItemStatus(item);
         return MonthlyPlanItemResponse.from(planItemRepository.save(item));
     }
@@ -567,9 +591,17 @@ public class FinancialPeriodService {
         if (item == null || item.getId() == null) {
             return;
         }
-        BigDecimal actual = transactionRepository.sumAmountByMonthlyPlanItem(item.getId());
-        item.setActualAmount(nullToZero(actual));
-        item.setPaidOn(transactionRepository.findLatestPaymentDateByMonthlyPlanItem(item.getId()));
+        BigDecimal paymentTotal = item.getType() == TransactionType.INCOME
+                ? paymentRepository.sumActiveByIncomePlan(item.getId())
+                : paymentRepository.sumActiveByPayable(item.getId());
+        if (paymentTotal != null && paymentTotal.signum() > 0) {
+            item.setActualAmount(nullToZero(paymentTotal));
+            item.setPaidOn(paymentRepository.findLatestActivePaymentDateByPlanItem(item.getId()));
+        } else {
+            BigDecimal actual = transactionRepository.sumAmountByMonthlyPlanItem(item.getId());
+            item.setActualAmount(nullToZero(actual));
+            item.setPaidOn(transactionRepository.findLatestPaymentDateByMonthlyPlanItem(item.getId()));
+        }
         recalculatePlanItemStatus(item);
         if (item.getAggregationType() == MonthlyPlanItemAggregationType.GROUP_PARENT) {
             synchronizeChildrenWithParentPayment(item);
@@ -977,61 +1009,6 @@ public class FinancialPeriodService {
         return value.length() > 2000 ? value.substring(0, 2000) : value;
     }
 
-    private BigDecimal sumTransactions(List<FinancialTransaction> transactions, TransactionType type) {
-        return transactions.stream()
-                .filter(transaction -> transaction.getType() == type)
-                .map(FinancialTransaction::getAmount)
-                .reduce(BigDecimal.ZERO, BigDecimal::add)
-                .setScale(2, RoundingMode.HALF_UP);
-    }
-
-    /**
-     * Calcula o impacto real que ainda não está representado no planejamento.
-     *
-     * Itens planejados já entram em plannedIncome/plannedExpense. Por isso, uma
-     * transação vinculada a um item mensal não deve entrar novamente aqui.
-     * Compras no cartão de crédito também não entram quando há um item de fatura
-     * no ciclo, porque a fatura manual já representa o fluxo de caixa daquele cartão.
-     */
-    private BigDecimal sumUnplannedProjectedImpact(List<FinancialTransaction> transactions, List<MonthlyPlanItem> items, TransactionType type) {
-        boolean hasCreditCardPlanItem = items.stream().anyMatch(this::isCreditCardPlanItem);
-        return transactions.stream()
-                .filter(transaction -> transaction.getType() == type)
-                .filter(transaction -> transaction.getMonthlyPlanItem() == null)
-                .filter(transaction -> !shouldIgnoreCreditCardPurchaseForProjection(transaction, hasCreditCardPlanItem))
-                .map(FinancialTransaction::getAmount)
-                .reduce(BigDecimal.ZERO, BigDecimal::add)
-                .setScale(2, RoundingMode.HALF_UP);
-    }
-
-    private boolean shouldIgnoreCreditCardPurchaseForProjection(FinancialTransaction transaction, boolean hasCreditCardPlanItem) {
-        return hasCreditCardPlanItem && isCreditCardPurchase(transaction);
-    }
-
-    private boolean isCreditCardPurchase(FinancialTransaction transaction) {
-        if (transaction.getType() != TransactionType.EXPENSE) {
-            return false;
-        }
-        String categoryName = transaction.getCategory() == null ? "" : transaction.getCategory().getName();
-        String accountType = transaction.getAccount() == null || transaction.getAccount().getType() == null
-                ? ""
-                : transaction.getAccount().getType().name();
-        return containsCreditCardText(categoryName) || "CREDIT_CARD".equals(accountType);
-    }
-
-    private boolean isCreditCardPlanItem(MonthlyPlanItem item) {
-        return item.getType() == TransactionType.EXPENSE
-                && item.getStatus() != MonthlyPlanItemStatus.CANCELED
-                && item.getAggregationType() == MonthlyPlanItemAggregationType.GROUP_PARENT;
-    }
-
-    private boolean containsCreditCardText(String value) {
-        String normalized = normalizeComparable(value);
-        return normalized.contains("cartao credito")
-                || normalized.contains("cartao de credito")
-                || normalized.contains("fatura cartao");
-    }
-
     private String normalizeComparable(String value) {
         if (value == null) {
             return "";
@@ -1042,26 +1019,6 @@ public class FinancialPeriodService {
                 .replaceAll("[^a-z0-9]+", " ")
                 .trim();
         return normalized.replaceAll("\\s+", " " );
-    }
-
-    private BigDecimal sumExpected(List<MonthlyPlanItem> items, TransactionType type) {
-        return items.stream()
-                .filter(item -> item.getType() == type)
-                .filter(item -> item.getStatus() != MonthlyPlanItemStatus.CANCELED)
-                .filter(this::includedInMainTotals)
-                .map(MonthlyPlanItem::getExpectedAmount)
-                .reduce(BigDecimal.ZERO, BigDecimal::add)
-                .setScale(2, RoundingMode.HALF_UP);
-    }
-
-    private BigDecimal sumActual(List<MonthlyPlanItem> items, TransactionType type) {
-        return items.stream()
-                .filter(item -> item.getType() == type)
-                .filter(item -> item.getStatus() != MonthlyPlanItemStatus.CANCELED)
-                .filter(this::includedInMainTotals)
-                .map(MonthlyPlanItem::getActualAmount)
-                .reduce(BigDecimal.ZERO, BigDecimal::add)
-                .setScale(2, RoundingMode.HALF_UP);
     }
 
     private void recalculatePlanItemStatus(MonthlyPlanItem item) {
@@ -1150,7 +1107,30 @@ public class FinancialPeriodService {
         return requested == null ? MonthlyPlanItemAggregationType.NORMAL : requested;
     }
 
-    private void applyRequestedHierarchy(String ownerEmail, MonthlyPlanItem item, MonthlyPlanItemAggregationType requestedAggregationType, Long requestedParentItemId) {
+    private MonthlyPlanItemAggregationType resolveTargetAggregationType(MonthlyPlanItem item, MonthlyPlanItemAggregationType requested, Long parentItemId) {
+        if (requested == null && parentItemId == null) {
+            return item.getAggregationType() == null ? MonthlyPlanItemAggregationType.NORMAL : item.getAggregationType();
+        }
+        return resolveAggregationType(requested, parentItemId);
+    }
+
+    private MonthlyPlanItemInvoiceContributionMode resolveInvoiceContributionMode(
+            MonthlyPlanItemInvoiceContributionMode requested,
+            MonthlyPlanItemAggregationType aggregationType
+    ) {
+        if (aggregationType == MonthlyPlanItemAggregationType.GROUP_CHILD) {
+            return requested == null ? MonthlyPlanItemInvoiceContributionMode.COMPOSITION_ONLY : requested;
+        }
+        return MonthlyPlanItemInvoiceContributionMode.COMPOSITION_ONLY;
+    }
+
+    private void applyRequestedHierarchy(
+            String ownerEmail,
+            MonthlyPlanItem item,
+            MonthlyPlanItemAggregationType requestedAggregationType,
+            Long requestedParentItemId,
+            MonthlyPlanItemInvoiceContributionMode requestedContributionMode
+    ) {
         if (requestedAggregationType == null && requestedParentItemId == null) {
             return;
         }
@@ -1160,7 +1140,7 @@ public class FinancialPeriodService {
             if (parent == null) {
                 throw new BusinessException("Selecione a fatura vinculada para transformar este item em item interno.");
             }
-            linkChildToParent(parent, item);
+            linkChildToParent(parent, item, requestedContributionMode);
             return;
         }
         if (requestedParentItemId != null) {
@@ -1179,12 +1159,15 @@ public class FinancialPeriodService {
             }
             item.setAggregationType(MonthlyPlanItemAggregationType.GROUP_CHILD);
             item.setRecurring(false);
+            item.setInvoiceBaseAmount(null);
             return;
         }
         if (item.getParentItem() != null) {
             if (aggregationType == MonthlyPlanItemAggregationType.NORMAL) {
                 item.setParentItem(null);
                 item.setAggregationType(MonthlyPlanItemAggregationType.NORMAL);
+                item.setInvoiceContributionMode(MonthlyPlanItemInvoiceContributionMode.COMPOSITION_ONLY);
+                item.setInvoiceBaseAmount(null);
                 if (item.isPaidByParent()) {
                     item.setActualAmount(BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP));
                     item.setPaidOn(null);
@@ -1206,15 +1189,41 @@ public class FinancialPeriodService {
             throw new BusinessException("A fatura manual precisa ser um item de despesa.");
         }
         item.setAggregationType(aggregationType);
-        if (aggregationType == MonthlyPlanItemAggregationType.GROUP_PARENT && item.getNature() == MonthlyPlanItemNature.VARIABLE) {
-            item.setNature(MonthlyPlanItemNature.CREDIT_CARD);
+        if (aggregationType == MonthlyPlanItemAggregationType.GROUP_PARENT) {
+            if (item.getNature() == MonthlyPlanItemNature.VARIABLE) {
+                item.setNature(MonthlyPlanItemNature.CREDIT_CARD);
+            }
+            if (item.getInvoiceBaseAmount() == null) {
+                item.setInvoiceBaseAmount(nullToZero(item.getExpectedAmount()));
+            }
+            item.setInvoiceContributionMode(MonthlyPlanItemInvoiceContributionMode.COMPOSITION_ONLY);
+        } else {
+            item.setInvoiceBaseAmount(null);
+            item.setInvoiceContributionMode(MonthlyPlanItemInvoiceContributionMode.COMPOSITION_ONLY);
         }
     }
 
-    private void linkChildToParent(MonthlyPlanItem parent, MonthlyPlanItem child) {
+    private void applyInvoiceFieldsAfterHierarchy(MonthlyPlanItem item, MonthlyPlanItemInvoiceContributionMode requestedContributionMode) {
+        MonthlyPlanItemAggregationType aggregationType = item.getAggregationType() == null
+                ? MonthlyPlanItemAggregationType.NORMAL
+                : item.getAggregationType();
+        if (aggregationType == MonthlyPlanItemAggregationType.GROUP_PARENT) {
+            if (item.getInvoiceBaseAmount() == null) {
+                item.setInvoiceBaseAmount(nullToZero(item.getExpectedAmount()));
+            }
+            item.setInvoiceContributionMode(MonthlyPlanItemInvoiceContributionMode.COMPOSITION_ONLY);
+            return;
+        }
+        item.setInvoiceBaseAmount(null);
+        item.setInvoiceContributionMode(resolveInvoiceContributionMode(requestedContributionMode, aggregationType));
+    }
+
+    private void linkChildToParent(MonthlyPlanItem parent, MonthlyPlanItem child, MonthlyPlanItemInvoiceContributionMode contributionMode) {
         validateParentChildRelationship(parent, child);
         child.setParentItem(parent);
         child.setAggregationType(MonthlyPlanItemAggregationType.GROUP_CHILD);
+        child.setInvoiceBaseAmount(null);
+        child.setInvoiceContributionMode(resolveInvoiceContributionMode(contributionMode, MonthlyPlanItemAggregationType.GROUP_CHILD));
         child.setRecurring(false);
         child.setRecurrenceEndDate(null);
         child.setRecurringTemplateId(null);
@@ -1222,6 +1231,23 @@ public class FinancialPeriodService {
         child.setRecurrenceKey(null);
         child.setSettlementOrigin(MonthlyPlanItemSettlementOrigin.DIRECT);
         child.setPaidByParent(false);
+    }
+
+    private void synchronizeInvoiceTotal(MonthlyPlanItem parent) {
+        if (parent == null || parent.getAggregationType() != MonthlyPlanItemAggregationType.GROUP_PARENT) {
+            return;
+        }
+        BigDecimal baseAmount = nullToZero(parent.getInvoiceBaseAmount() == null ? parent.getExpectedAmount() : parent.getInvoiceBaseAmount());
+        parent.setInvoiceBaseAmount(baseAmount);
+        BigDecimal addedByChildren = planItemRepository.findChildrenByParentIdAndOwnerEmail(parent.getId(), parent.getOwner().getEmail())
+                .stream()
+                .filter(child -> child.getStatus() != MonthlyPlanItemStatus.CANCELED)
+                .filter(child -> child.getInvoiceContributionMode() == MonthlyPlanItemInvoiceContributionMode.ADDS_TO_INVOICE_TOTAL)
+                .map(MonthlyPlanItem::getExpectedAmount)
+                .map(this::nullToZero)
+                .reduce(BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP), BigDecimal::add);
+        parent.setExpectedAmount(baseAmount.add(addedByChildren).setScale(2, RoundingMode.HALF_UP));
+        recalculatePlanItemStatus(parent);
     }
 
     private void validateInvoiceParent(MonthlyPlanItem invoice) {

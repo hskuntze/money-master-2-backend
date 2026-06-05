@@ -26,9 +26,18 @@ import br.com.kuntzedevprojects.money_master_2.dtos.ai.ToolTransactionResponse;
 import br.com.kuntzedevprojects.money_master_2.dtos.finance.CategoryCreateRequest;
 import br.com.kuntzedevprojects.money_master_2.dtos.finance.CategoryResponse;
 import br.com.kuntzedevprojects.money_master_2.dtos.finance.FinancialTransactionResponse;
+import br.com.kuntzedevprojects.money_master_2.dtos.finance.MonthlyPlanItemInvoiceLinkRequest;
 import br.com.kuntzedevprojects.money_master_2.dtos.finance.MonthlyPlanItemResponse;
+import br.com.kuntzedevprojects.money_master_2.dtos.finance.creditcard.CreditCardInvoiceResponse;
+import br.com.kuntzedevprojects.money_master_2.dtos.finance.payment.PaymentRequest;
+import br.com.kuntzedevprojects.money_master_2.dtos.finance.payment.PaymentResponse;
+import br.com.kuntzedevprojects.money_master_2.dtos.savingsjar.SavingsJarContributionPlanRequest;
+import br.com.kuntzedevprojects.money_master_2.dtos.savingsjar.SavingsJarContributionPlanResponse;
 import br.com.kuntzedevprojects.money_master_2.dtos.installments.InstallmentPurchaseResponse;
 import br.com.kuntzedevprojects.money_master_2.dtos.installments.InstallmentPaymentResultResponse;
+import br.com.kuntzedevprojects.money_master_2.dtos.installments.InstallmentAnticipationRequest;
+import br.com.kuntzedevprojects.money_master_2.dtos.installments.InstallmentAnticipationPreviewResponse;
+import br.com.kuntzedevprojects.money_master_2.dtos.installments.InstallmentAnticipationResponse;
 import br.com.kuntzedevprojects.money_master_2.dtos.finance.MonthlyPlanReconcileRequest;
 import br.com.kuntzedevprojects.money_master_2.dtos.finance.MonthlyPlanReconcileResponse;
 import br.com.kuntzedevprojects.money_master_2.dtos.savingsjar.SavingsJarBalanceCorrectionResponse;
@@ -38,11 +47,16 @@ import br.com.kuntzedevprojects.money_master_2.entities.FinancialTransaction;
 import br.com.kuntzedevprojects.money_master_2.entities.User;
 import br.com.kuntzedevprojects.money_master_2.enums.AiCommandStatus;
 import br.com.kuntzedevprojects.money_master_2.enums.FinanceCommandType;
+import br.com.kuntzedevprojects.money_master_2.enums.MonthlyPlanItemInvoiceContributionMode;
 import br.com.kuntzedevprojects.money_master_2.enums.MonthlyPlanItemNature;
 import br.com.kuntzedevprojects.money_master_2.enums.TransactionType;
 import br.com.kuntzedevprojects.money_master_2.exceptions.BusinessException;
 import br.com.kuntzedevprojects.money_master_2.repositories.AiCommandAuditRepository;
 import br.com.kuntzedevprojects.money_master_2.repositories.FinancialTransactionRepository;
+import br.com.kuntzedevprojects.money_master_2.services.finance.creditcard.CreditCardInvoicePaymentService;
+import br.com.kuntzedevprojects.money_master_2.services.finance.installment.InstallmentAnticipationService;
+import br.com.kuntzedevprojects.money_master_2.services.finance.payment.PaymentService;
+import br.com.kuntzedevprojects.money_master_2.services.finance.savings.SavingsJarContributionPlanService;
 
 @Service
 public class FinanceCommandExecutor {
@@ -58,6 +72,10 @@ public class FinanceCommandExecutor {
     private final FinancialPeriodService financialPeriodService;
     private final MonthlyPlanReconciliationService reconciliationService;
     private final InstallmentPurchaseService installmentPurchaseService;
+    private final PaymentService paymentService;
+    private final CreditCardInvoicePaymentService creditCardInvoicePaymentService;
+    private final InstallmentAnticipationService installmentAnticipationService;
+    private final SavingsJarContributionPlanService savingsJarContributionPlanService;
     private final FinancialTransactionRepository transactionRepository;
     private final AiCommandAuditRepository auditRepository;
     private final ObjectMapper objectMapper;
@@ -72,6 +90,10 @@ public class FinanceCommandExecutor {
             FinancialPeriodService financialPeriodService,
             MonthlyPlanReconciliationService reconciliationService,
             InstallmentPurchaseService installmentPurchaseService,
+            PaymentService paymentService,
+            CreditCardInvoicePaymentService creditCardInvoicePaymentService,
+            InstallmentAnticipationService installmentAnticipationService,
+            SavingsJarContributionPlanService savingsJarContributionPlanService,
             FinancialTransactionRepository transactionRepository,
             AiCommandAuditRepository auditRepository,
             ObjectMapper objectMapper
@@ -85,6 +107,10 @@ public class FinanceCommandExecutor {
         this.financialPeriodService = financialPeriodService;
         this.reconciliationService = reconciliationService;
         this.installmentPurchaseService = installmentPurchaseService;
+        this.paymentService = paymentService;
+        this.creditCardInvoicePaymentService = creditCardInvoicePaymentService;
+        this.installmentAnticipationService = installmentAnticipationService;
+        this.savingsJarContributionPlanService = savingsJarContributionPlanService;
         this.transactionRepository = transactionRepository;
         this.auditRepository = auditRepository;
         this.objectMapper = objectMapper;
@@ -160,13 +186,19 @@ public class FinanceCommandExecutor {
                 case REGISTER_SAVINGS_JAR_YIELD -> registerSavingsJarYield(ownerEmail, command, dryRun);
                 case RECONCILE_SAVINGS_JAR_YIELD -> reconcileSavingsJarYield(ownerEmail, command, dryRun);
                 case RECONCILE_SAVINGS_JAR_BALANCE -> reconcileSavingsJarBalance(ownerEmail, command, dryRun);
-                case CREATE_MONTHLY_PLAN_ITEM -> createMonthlyPlanItem(ownerEmail, command, dryRun);
+                case CREATE_SAVINGS_JAR_CONTRIBUTION_PLAN -> createSavingsJarContributionPlan(ownerEmail, command, dryRun);
+                case CREATE_MONTHLY_PLAN_ITEM, CREATE_MONTHLY_INCOME_PLAN, CREATE_MONTHLY_PAYABLE -> createMonthlyPlanItem(ownerEmail, command, dryRun);
                 case PAY_MONTHLY_PLAN_ITEM -> payMonthlyPlanItem(ownerEmail, command, dryRun);
+                case REGISTER_PAYMENT -> registerPayment(ownerEmail, command, dryRun);
+                case REGISTER_INCOME_RECEIPT -> registerIncomeReceipt(ownerEmail, command, dryRun);
+                case PAY_CREDIT_CARD_INVOICE -> payCreditCardInvoice(ownerEmail, command, dryRun);
                 case REOPEN_MONTHLY_PLAN_ITEM -> reopenMonthlyPlanItem(ownerEmail, command, dryRun);
                 case INCREASE_MONTHLY_PLAN_ITEM_EXPECTED_AMOUNT -> increaseMonthlyPlanItemExpectedAmount(ownerEmail, command, dryRun);
                 case CREATE_INSTALLMENT_MONTHLY_PLAN_ITEMS -> createInstallmentMonthlyPlanItems(ownerEmail, command, dryRun);
                 case CREATE_INSTALLMENT_PURCHASE -> createInstallmentPurchase(ownerEmail, command, dryRun);
                 case PAY_INSTALLMENT_PURCHASE -> payInstallmentPurchase(ownerEmail, command, dryRun);
+                case ANTICIPATE_INSTALLMENTS -> anticipateInstallments(ownerEmail, command, dryRun);
+                case LINK_MONTHLY_PLAN_ITEM_TO_INVOICE -> linkMonthlyPlanItemToInvoice(ownerEmail, command, dryRun);
                 case LINK_TRANSACTION_TO_MONTHLY_PLAN_ITEM -> linkTransactionToMonthlyPlanItem(ownerEmail, command, dryRun);
                 case RECONCILE_MONTHLY_PLAN_WITH_TRANSACTIONS -> reconcileMonthlyPlan(ownerEmail, command, dryRun);
             };
@@ -339,8 +371,43 @@ public class FinanceCommandExecutor {
                 : executed(command.type(), response.message(), mapOf("balanceCorrection", response));
     }
 
+    private FinanceCommandResult createSavingsJarContributionPlan(String ownerEmail, FinanceCommandItem command, boolean dryRun) {
+        Long cycleId = resolveCycleId(ownerEmail, command);
+        Long jarId = command.savingsJarId();
+        if (jarId == null) {
+            jarId = savingsJarService.resolveForAi(ownerEmail, command.savingsJarName(), command.institutionName()).getId();
+        }
+        LocalDate dueDate = parseDateOrToday(command.dueDate() == null ? command.occurredOn() : command.dueDate());
+        if (dryRun) {
+            return previewed(command.type(), true, "Vou criar um aporte planejado de cofrinho no ciclo mensal.", mapOf(
+                    "cicloId", cycleId,
+                    "cofrinhoId", jarId,
+                    "cofrinho", command.savingsJarName(),
+                    "valor", command.amount(),
+                    "dataPrevista", dueDate,
+                    "recorrente", command.recurring(),
+                    "limiteRecorrencia", command.recurrenceEndDate()
+            ));
+        }
+        SavingsJarContributionPlanResponse response = savingsJarContributionPlanService.create(
+                ownerEmail,
+                cycleId,
+                jarId,
+                new SavingsJarContributionPlanRequest(
+                        cycleId,
+                        command.amount(),
+                        dueDate,
+                        command.recurring(),
+                        parseDateOrNull(command.recurrenceEndDate()),
+                        command.notes()
+                )
+        );
+        return executed(command.type(), "Aporte planejado de cofrinho criado no ciclo mensal.", mapOf("savingsJarContributionPlan", response));
+    }
+
 
     private FinanceCommandResult createMonthlyPlanItem(String ownerEmail, FinanceCommandItem command, boolean dryRun) {
+        Long cycleId = resolveCycleId(ownerEmail, command);
         LocalDate dueDate = parseDateOrToday(command.dueDate() == null ? command.occurredOn() : command.dueDate());
         String safeDescription = planDescription(command);
         if (dryRun) {
@@ -355,7 +422,7 @@ public class FinanceCommandExecutor {
         }
         MonthlyPlanItemResponse response = reconciliationService.createPlanItemFromAi(
                 ownerEmail,
-                command.financialPeriodId(),
+                cycleId,
                 command.transactionType(),
                 safeDescription,
                 command.amount(),
@@ -402,6 +469,62 @@ public class FinanceCommandExecutor {
                 command.notes()
         );
         return executed(command.type(), "Baixa do planejamento mensal processada com sucesso.", mapOf("monthlyPlanItem", response));
+    }
+
+    private FinanceCommandResult registerPayment(String ownerEmail, FinanceCommandItem command, boolean dryRun) {
+        Long payableId = firstNonNull(command.monthlyPayableId(), command.monthlyPlanItemId());
+        if (dryRun) {
+            return previewed(command.type(), true, "Vou registrar pagamento de uma conta mensal usando a entidade Payment.", mapOf(
+                    "monthlyPayableId", payableId,
+                    "valor", command.amount(),
+                    "dataPagamento", firstNonBlank(command.paymentDate(), command.occurredOn()),
+                    "contaId", command.accountId(),
+                    "criarTransacao", command.createIfMissing()
+            ));
+        }
+        PaymentResponse response = paymentService.registerPayablePayment(
+                ownerEmail,
+                requiredLong(payableId, "Informe o id da conta mensal."),
+                paymentRequest(command)
+        );
+        return executed(command.type(), "Pagamento registrado com sucesso.", mapOf("payment", response));
+    }
+
+    private FinanceCommandResult registerIncomeReceipt(String ownerEmail, FinanceCommandItem command, boolean dryRun) {
+        Long incomePlanId = firstNonNull(command.monthlyIncomePlanId(), command.monthlyPlanItemId());
+        if (dryRun) {
+            return previewed(command.type(), true, "Vou registrar recebimento de uma renda planejada usando a entidade Payment.", mapOf(
+                    "monthlyIncomePlanId", incomePlanId,
+                    "valor", command.amount(),
+                    "dataRecebimento", firstNonBlank(command.paymentDate(), command.occurredOn()),
+                    "contaId", command.accountId(),
+                    "criarTransacao", command.createIfMissing()
+            ));
+        }
+        PaymentResponse response = paymentService.registerIncomeReceipt(
+                ownerEmail,
+                requiredLong(incomePlanId, "Informe o id da renda planejada."),
+                paymentRequest(command)
+        );
+        return executed(command.type(), "Recebimento registrado com sucesso.", mapOf("payment", response));
+    }
+
+    private FinanceCommandResult payCreditCardInvoice(String ownerEmail, FinanceCommandItem command, boolean dryRun) {
+        if (dryRun) {
+            return previewed(command.type(), true, "Vou pagar uma fatura de cartao. O pagamento da fatura gera saida de caixa; compras no cartao nao geram saida imediata.", mapOf(
+                    "creditCardInvoiceId", command.creditCardInvoiceId(),
+                    "valor", command.amount(),
+                    "dataPagamento", firstNonBlank(command.paymentDate(), command.occurredOn()),
+                    "contaId", command.accountId(),
+                    "criarTransacao", command.createIfMissing()
+            ));
+        }
+        CreditCardInvoiceResponse response = creditCardInvoicePaymentService.pay(
+                ownerEmail,
+                requiredLong(command.creditCardInvoiceId(), "Informe o id da fatura de cartao."),
+                paymentRequest(command)
+        );
+        return executed(command.type(), "Fatura paga com sucesso.", mapOf("creditCardInvoice", response));
     }
 
     private FinanceCommandResult reopenMonthlyPlanItem(String ownerEmail, FinanceCommandItem command, boolean dryRun) {
@@ -551,6 +674,65 @@ public class FinanceCommandExecutor {
         return executed(command.type(), response.message(), mapOf("installmentPurchase", response.purchase()));
     }
 
+    private FinanceCommandResult anticipateInstallments(String ownerEmail, FinanceCommandItem command, boolean dryRun) {
+        Long purchaseId = requiredLong(command.installmentPurchaseId(), "Informe o id da compra parcelada.");
+        List<Long> installmentIds = command.installmentIds();
+        if (dryRun) {
+            InstallmentAnticipationPreviewResponse preview = installmentAnticipationService.preview(
+                    ownerEmail,
+                    purchaseId,
+                    installmentIds,
+                    command.discountAmount(),
+                    command.anticipatedAmount(),
+                    command.targetInvoiceId()
+            );
+            return previewed(command.type(), true, preview.projectedImpact(), mapOf("installmentAnticipationPreview", preview));
+        }
+        InstallmentAnticipationResponse response = installmentAnticipationService.anticipate(
+                ownerEmail,
+                purchaseId,
+                new InstallmentAnticipationRequest(
+                        installmentIds,
+                        parseDateOrNull(firstNonBlank(command.paymentDate(), command.occurredOn())),
+                        command.targetInvoiceId(),
+                        command.accountId(),
+                        command.anticipatedAmount(),
+                        command.discountAmount(),
+                        command.notes(),
+                        null
+                )
+        );
+        return executed(command.type(), "Parcelas antecipadas com sucesso.", mapOf("installmentAnticipation", response));
+    }
+
+    private FinanceCommandResult linkMonthlyPlanItemToInvoice(String ownerEmail, FinanceCommandItem command, boolean dryRun) {
+        MonthlyPlanItemInvoiceContributionMode contributionMode = parseInvoiceContributionMode(command.invoiceContributionMode());
+        boolean ambiguous = command.invoiceItemId() == null
+                || command.monthlyPlanItemId() == null
+                || command.invoiceContributionMode() == null
+                || command.invoiceContributionMode().isBlank();
+        if (dryRun) {
+            return previewed(command.type(), ambiguous, "Vou vincular um item mensal como item interno de uma fatura de cartão.", mapOf(
+                    "faturaId", command.invoiceItemId(),
+                    "itemPlanejadoId", command.monthlyPlanItemId(),
+                    "modo", contributionMode.name(),
+                    "efeito", contributionMode == MonthlyPlanItemInvoiceContributionMode.ADDS_TO_INVOICE_TOTAL
+                            ? "O valor será adicionado ao total da fatura."
+                            : "O item apenas compõe a fatura já informada, sem alterar o total."
+            ));
+        }
+        MonthlyPlanItemResponse response = financialPeriodService.linkPlanItemToInvoice(
+                ownerEmail,
+                requiredLong(command.invoiceItemId(), "Informe o id da fatura."),
+                requiredLong(command.monthlyPlanItemId(), "Informe o id do item que será vinculado à fatura."),
+                new MonthlyPlanItemInvoiceLinkRequest(contributionMode)
+        );
+        String message = contributionMode == MonthlyPlanItemInvoiceContributionMode.ADDS_TO_INVOICE_TOTAL
+                ? "Item vinculado à fatura e adicionado ao total do cartão."
+                : "Item vinculado como composição da fatura, sem alterar o total do cartão.";
+        return executed(command.type(), message, mapOf("invoice", response));
+    }
+
     private FinanceCommandResult linkTransactionToMonthlyPlanItem(String ownerEmail, FinanceCommandItem command, boolean dryRun) {
         LocalDate occurredOn = parseDateOrToday(command.occurredOn() == null ? command.dueDate() : command.occurredOn());
         if (dryRun) {
@@ -587,11 +769,7 @@ public class FinanceCommandExecutor {
     }
 
     private FinanceCommandResult reconcileMonthlyPlan(String ownerEmail, FinanceCommandItem command, boolean dryRun) {
-        Long periodId = command.financialPeriodId();
-        if (periodId == null) {
-            LocalDate reference = parseDateOrToday(command.occurredOn());
-            periodId = financialPeriodService.findOrCreateForDate(ownerEmail, reference).getId();
-        }
+        Long periodId = resolveCycleId(ownerEmail, command);
         MonthlyPlanReconcileRequest request = new MonthlyPlanReconcileRequest(
                 dryRun,
                 command.createMissingPlanItems(),
@@ -667,6 +845,42 @@ public class FinanceCommandExecutor {
         return null;
     }
 
+    private PaymentRequest paymentRequest(FinanceCommandItem command) {
+        return new PaymentRequest(
+                command.transactionId(),
+                command.accountId(),
+                command.categoryId(),
+                command.amount(),
+                parseDateOrNull(firstNonBlank(command.paymentDate(), command.occurredOn())),
+                null,
+                null,
+                command.createIfMissing() == null ? true : command.createIfMissing(),
+                command.notes()
+        );
+    }
+
+    @SafeVarargs
+    private final <T> T firstNonNull(T... values) {
+        if (values == null) {
+            return null;
+        }
+        for (T value : values) {
+            if (value != null) {
+                return value;
+            }
+        }
+        return null;
+    }
+
+    private Long resolveCycleId(String ownerEmail, FinanceCommandItem command) {
+        Long explicit = firstNonNull(command.monthlyCycleId(), command.financialPeriodId());
+        if (explicit != null) {
+            return explicit;
+        }
+        LocalDate reference = parseDateOrToday(command.dueDate() == null ? command.occurredOn() : command.dueDate());
+        return financialPeriodService.findOrCreateForDate(ownerEmail, reference).getId();
+    }
+
     private String optionalPlanDescription(FinanceCommandItem command) {
         if (command.planItemDescription() != null && !command.planItemDescription().isBlank()) {
             return command.planItemDescription().trim();
@@ -714,6 +928,25 @@ public class FinanceCommandExecutor {
         return value.trim();
     }
 
+    private Long requiredLong(Long value, String message) {
+        if (value == null) {
+            throw new BusinessException(message);
+        }
+        return value;
+    }
+
+    private MonthlyPlanItemInvoiceContributionMode parseInvoiceContributionMode(String value) {
+        if (value == null || value.isBlank()) {
+            return MonthlyPlanItemInvoiceContributionMode.COMPOSITION_ONLY;
+        }
+        String normalized = value.trim().toUpperCase();
+        return switch (normalized) {
+            case "ADDS_TO_INVOICE_TOTAL", "ADICIONAR_A_FATURA", "ADICIONA_NA_FATURA", "SOMA_NA_FATURA", "SOMAR_NA_FATURA", "NOVO_LANCAMENTO", "NOVO_LANÇAMENTO" -> MonthlyPlanItemInvoiceContributionMode.ADDS_TO_INVOICE_TOTAL;
+            case "COMPOSITION_ONLY", "APENAS_COMPOR", "COMPOSICAO", "COMPOSIÇÃO", "INFORMATIVO", "RETROATIVO", "RETROATIVA" -> MonthlyPlanItemInvoiceContributionMode.COMPOSITION_ONLY;
+            default -> MonthlyPlanItemInvoiceContributionMode.valueOf(normalized);
+        };
+    }
+
     private TransactionType parseTransactionType(String value) {
         TransactionType type = parseTransactionTypeOrNull(value);
         if (type == null) {
@@ -743,6 +976,8 @@ public class FinanceCommandExecutor {
         return switch (normalized) {
             case "FIXED", "FIXA", "FIXO" -> MonthlyPlanItemNature.FIXED;
             case "VARIABLE", "VARIAVEL", "VARIÁVEL", "VARIAVEIS", "VARIÁVEIS" -> MonthlyPlanItemNature.VARIABLE;
+            case "CREDIT_CARD", "CARTAO", "CARTAO_DE_CREDITO", "CREDITO", "FATURA" -> MonthlyPlanItemNature.CREDIT_CARD;
+            case "SAVINGS_JAR", "COFRINHO", "RESERVA", "POUPANCA" -> MonthlyPlanItemNature.SAVINGS_JAR;
             default -> MonthlyPlanItemNature.valueOf(normalized);
         };
     }

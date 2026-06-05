@@ -20,10 +20,16 @@ public class AccessLogService {
 
     private final AccessLogRepository repository;
     private final RequestMetadataExtractor metadataExtractor;
+    private final SecurityAuditService securityAuditService;
 
-    public AccessLogService(AccessLogRepository repository, RequestMetadataExtractor metadataExtractor) {
+    public AccessLogService(
+            AccessLogRepository repository,
+            RequestMetadataExtractor metadataExtractor,
+            SecurityAuditService securityAuditService
+    ) {
         this.repository = repository;
         this.metadataExtractor = metadataExtractor;
+        this.securityAuditService = securityAuditService;
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
@@ -33,7 +39,7 @@ public class AccessLogService {
             accessLog.setOccurredAt(Instant.now());
             accessLog.setMethod(request.getMethod());
             accessLog.setPath(request.getRequestURI());
-            accessLog.setQueryString(request.getQueryString());
+            accessLog.setQueryString(metadataExtractor.safeQueryString(request));
             accessLog.setStatusCode(response.getStatus());
             accessLog.setDurationMs(durationMs);
             accessLog.setPrincipal(metadataExtractor.principal(request));
@@ -41,8 +47,28 @@ public class AccessLogService {
             accessLog.setUserAgent(metadataExtractor.userAgent(request));
             accessLog.setSuccess(response.getStatus() < 400);
             repository.save(accessLog);
+            recordSensitiveWriteIfNeeded(request, response);
         } catch (Exception ex) {
             log.warn("Não foi possível registrar log de acesso: {}", ex.getMessage(), ex);
         }
+    }
+
+    private void recordSensitiveWriteIfNeeded(HttpServletRequest request, HttpServletResponse response) {
+        if (response.getStatus() >= 400 || !isWriteMethod(request.getMethod())) {
+            return;
+        }
+        String path = request.getRequestURI();
+        if (path == null || path.contains("/auth/")) {
+            return;
+        }
+        securityAuditService.record("SENSITIVE_WRITE", null, true, request,
+                "Operação de escrita executada com sucesso. Payload não registrado por segurança.");
+    }
+
+    private boolean isWriteMethod(String method) {
+        return "POST".equalsIgnoreCase(method)
+                || "PUT".equalsIgnoreCase(method)
+                || "PATCH".equalsIgnoreCase(method)
+                || "DELETE".equalsIgnoreCase(method);
     }
 }

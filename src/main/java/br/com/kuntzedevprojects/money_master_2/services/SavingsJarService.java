@@ -17,6 +17,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 import br.com.kuntzedevprojects.money_master_2.config.properties.SavingsJarYieldProperties;
 import br.com.kuntzedevprojects.money_master_2.dtos.ai.ToolSavingsJarResponse;
+import br.com.kuntzedevprojects.money_master_2.dtos.finance.FinancialPeriodResponse;
+import br.com.kuntzedevprojects.money_master_2.dtos.finance.MonthlyPlanItemResponse;
 import br.com.kuntzedevprojects.money_master_2.dtos.savingsjar.SavingsJarApplyYieldResponse;
 import br.com.kuntzedevprojects.money_master_2.dtos.savingsjar.SavingsJarBalanceCorrectionResponse;
 import br.com.kuntzedevprojects.money_master_2.dtos.savingsjar.SavingsJarCreateRequest;
@@ -32,9 +34,11 @@ import br.com.kuntzedevprojects.money_master_2.entities.Account;
 import br.com.kuntzedevprojects.money_master_2.entities.SavingsJar;
 import br.com.kuntzedevprojects.money_master_2.entities.SavingsJarMovement;
 import br.com.kuntzedevprojects.money_master_2.entities.User;
+import br.com.kuntzedevprojects.money_master_2.enums.MonthlyPlanItemNature;
 import br.com.kuntzedevprojects.money_master_2.enums.SavingsJarMovementType;
 import br.com.kuntzedevprojects.money_master_2.enums.SavingsJarYieldCalculationType;
 import br.com.kuntzedevprojects.money_master_2.enums.TransactionSource;
+import br.com.kuntzedevprojects.money_master_2.enums.TransactionType;
 import br.com.kuntzedevprojects.money_master_2.exceptions.BusinessException;
 import br.com.kuntzedevprojects.money_master_2.exceptions.ResourceNotFoundException;
 import br.com.kuntzedevprojects.money_master_2.repositories.SavingsJarMovementRepository;
@@ -47,6 +51,7 @@ public class SavingsJarService {
     private final SavingsJarMovementRepository movementRepository;
     private final CurrentUserService currentUserService;
     private final AccountService accountService;
+    private final FinancialPeriodService financialPeriodService;
     private final SavingsJarYieldService yieldService;
     private final SavingsJarYieldProperties yieldProperties;
 
@@ -55,6 +60,7 @@ public class SavingsJarService {
             SavingsJarMovementRepository movementRepository,
             CurrentUserService currentUserService,
             AccountService accountService,
+            FinancialPeriodService financialPeriodService,
             SavingsJarYieldService yieldService,
             SavingsJarYieldProperties yieldProperties
     ) {
@@ -62,6 +68,7 @@ public class SavingsJarService {
         this.movementRepository = movementRepository;
         this.currentUserService = currentUserService;
         this.accountService = accountService;
+        this.financialPeriodService = financialPeriodService;
         this.yieldService = yieldService;
         this.yieldProperties = yieldProperties;
     }
@@ -72,6 +79,11 @@ public class SavingsJarService {
                 .stream()
                 .map(this::toResponse)
                 .toList();
+    }
+
+    @Transactional(readOnly = true)
+    public List<SavingsJar> listEntities(String ownerEmail) {
+        return savingsJarRepository.findByOwnerEmailWithAccount(ownerEmail);
     }
 
     @Transactional
@@ -85,6 +97,18 @@ public class SavingsJarService {
         BigDecimal totalSaved = jars.stream().map(SavingsJarResponse::currentAmount).reduce(BigDecimal.ZERO, BigDecimal::add);
         BigDecimal totalTarget = jars.stream().map(SavingsJarResponse::targetAmount).reduce(BigDecimal.ZERO, BigDecimal::add);
         BigDecimal totalYield = jars.stream().map(SavingsJarResponse::totalYield).reduce(BigDecimal.ZERO, BigDecimal::add);
+        FinancialPeriodResponse currentPeriod = financialPeriodService.current(ownerEmail);
+        List<MonthlyPlanItemResponse> currentPlanItems = financialPeriodService.listPlanItems(ownerEmail, currentPeriod.id(), null);
+        BigDecimal monthlyPlannedContribution = currentPlanItems.stream()
+                .filter(item -> item.type() == TransactionType.EXPENSE)
+                .filter(item -> item.nature() == MonthlyPlanItemNature.SAVINGS_JAR)
+                .map(MonthlyPlanItemResponse::expectedAmount)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        BigDecimal monthlyActualContribution = currentPlanItems.stream()
+                .filter(item -> item.type() == TransactionType.EXPENSE)
+                .filter(item -> item.nature() == MonthlyPlanItemNature.SAVINGS_JAR)
+                .map(MonthlyPlanItemResponse::actualAmount)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
         BigDecimal remaining = totalTarget.subtract(totalSaved).max(BigDecimal.ZERO).setScale(2, RoundingMode.HALF_UP);
         BigDecimal averageProgress = BigDecimal.ZERO;
         if (!jars.isEmpty()) {
@@ -98,6 +122,8 @@ public class SavingsJarService {
                 totalSaved.setScale(2, RoundingMode.HALF_UP),
                 totalTarget.setScale(2, RoundingMode.HALF_UP),
                 totalYield.setScale(2, RoundingMode.HALF_UP),
+                monthlyPlannedContribution.setScale(2, RoundingMode.HALF_UP),
+                monthlyActualContribution.setScale(2, RoundingMode.HALF_UP),
                 remaining,
                 averageProgress,
                 jars.size(),

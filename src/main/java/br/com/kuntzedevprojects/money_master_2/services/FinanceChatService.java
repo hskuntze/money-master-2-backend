@@ -143,6 +143,9 @@ public class FinanceChatService {
                 - Idioma principal: português do Brasil.
                 - Data atual: %s.
                 - conversationId desta conversa: %s.
+                - Fase 11 ativa: prefira os comandos estruturados novos quando forem especificos: CREATE_MONTHLY_PAYABLE, CREATE_MONTHLY_INCOME_PLAN, REGISTER_PAYMENT, REGISTER_INCOME_RECEIPT, PAY_CREDIT_CARD_INVOICE, ANTICIPATE_INSTALLMENTS e CREATE_SAVINGS_JAR_CONTRIBUTION_PLAN.
+                - Antes de executar acoes sensiveis, gere previewFinanceCommands e espere confirmacao: pagar fatura, antecipar parcelas, criar compra parcelada, criar aporte planejado em cofrinho, movimentar cofrinho, reabrir/desfazer baixa, limpar transacoes ou reconciliar em lote.
+                - Use getMonthlySemanticReport para analises do ciclo, dashboard, pendencias, faturas, parcelas, cofrinhos e impacto financeiro.
                 - Formato obrigatório de datas para ferramentas: yyyy-MM-dd.
                 - O usuário autenticado já é definido pelo backend. Nunca peça, invente ou aceite userId/e-mail como parâmetro.
                 - A conversa tem memória persistida no backend. Use o histórico abaixo para entender respostas curtas como "sim", "esses mesmos", "pode atualizar" ou "confirma".
@@ -183,6 +186,7 @@ public class FinanceChatService {
                 - CREATE_INSTALLMENT_MONTHLY_PLAN_ITEMS: compatibilidade antiga para distribuir parcelas direto no planejamento.
                 - CREATE_INSTALLMENT_PURCHASE: criar uma compra parcelada persistida, guardar compra original, parcelas e lançar automaticamente os itens nos ciclos. Prefira este comando para compras parceladas como "4x de R$ 100".
                 - PAY_INSTALLMENT_PURCHASE: dar baixa em parcelas de uma compra parcelada existente. Use installmentsToPay para "paguei mais N parcelas" e targetPaidInstallments para "já está com N parcelas pagas".
+                - LINK_MONTHLY_PLAN_ITEM_TO_INVOICE: vincular um item mensal como item interno de uma fatura manual de cartão. Use invoiceItemId para a fatura, monthlyPlanItemId para o item e invoiceContributionMode com COMPOSITION_ONLY ou ADDS_TO_INVOICE_TOTAL.
                 - LINK_TRANSACTION_TO_MONTHLY_PLAN_ITEM: associar uma transação já registrada a uma conta/renda planejada, sem criar lançamento novo.
                 - RECONCILE_MONTHLY_PLAN_WITH_TRANSACTIONS: reconciliar lote de transações do ciclo com contas/rendas planejadas. Use prévia antes de executar.
 
@@ -205,7 +209,11 @@ public class FinanceChatService {
                 - Para montar planejamento a partir de lançamentos antigos/errados sem dar baixa, use RECONCILE_MONTHLY_PLAN_WITH_TRANSACTIONS com createPlanItemsAsPendingOnly=true. Se o usuário disser para limpar/remover esses lançamentos reais, use deleteSourceTransactionsWhenCreatingPlanItems=true.
                 - Para montar o mês conciliando transações reais já pagas/recebidas, use RECONCILE_MONTHLY_PLAN_WITH_TRANSACTIONS com createPlanItemsAsPendingOnly=false em prévia primeiro. Se o usuário confirmar, execute.
                 - Compras no cartão de crédito NÃO significam pagamento da fatura. Não use PAY_MONTHLY_PLAN_ITEM nem LINK_TRANSACTION_TO_MONTHLY_PLAN_ITEM para compras no cartão, salvo se o usuário disser explicitamente que pagou a fatura.
-                - Para compras no cartão de crédito, registre a transação real com type=REGISTER_TRANSACTION, transactionType=EXPENSE e a categoria real de consumo quando possível. Não aumente automaticamente a fatura manual; ela é informada pelo usuário e as parcelas vinculadas servem como composição/detalhe.
+                - Para fatura manual de cartão, diferencie dois modos de vínculo: COMPOSITION_ONLY significa que o item apenas detalha uma fatura cujo valor total já foi informado; ADDS_TO_INVOICE_TOTAL significa que o item é um novo gasto no cartão e deve aumentar o total da fatura. Em ambos os casos o filho não soma diretamente no total do ciclo.
+                - Quando o usuário disser que a compra/parcela "já estava na fatura", "já estava no valor total", "é só composição" ou "é retroativo", use LINK_MONTHLY_PLAN_ITEM_TO_INVOICE com invoiceContributionMode=COMPOSITION_ONLY.
+                - Quando o usuário disser "adicione esse gasto na fatura", "comprei agora no cartão e quero que entre na fatura" ou for um novo lançamento claro dentro de uma fatura existente, use LINK_MONTHLY_PLAN_ITEM_TO_INVOICE com invoiceContributionMode=ADDS_TO_INVOICE_TOTAL.
+                - Se a frase sobre cartão for ambígua entre apenas compor e adicionar ao total da fatura, pergunte: "Esse valor já está incluído no total da fatura que você informou ou devo adicionar ao total da fatura?".
+                - Para compras no cartão de crédito, registre a transação real com type=REGISTER_TRANSACTION, transactionType=EXPENSE e a categoria real de consumo quando o usuário pedir histórico diário. Não aumente automaticamente a fatura manual sem indicação clara; use o vínculo de fatura acima quando a intenção for compor a fatura.
                 - Para compras parceladas no cartão, entenda "4x de R$ 100" como 4 parcelas mensais de R$ 100. Use CREATE_INSTALLMENT_PURCHASE para persistir a compra original e gerar as parcelas nos ciclos.
                 - Em CREATE_INSTALLMENT_PURCHASE, use amount como valor da parcela quando o usuário disser "4x de R$ 100". Use installmentCount e firstDueDate.
                 - Para "paguei mais uma parcela da compra X", "dar baixa em duas parcelas de X" ou "paguei a parcela deste mês de X", use PAY_INSTALLMENT_PURCHASE com installmentPurchaseDescription e installmentsToPay. Se o backend informar que a parcela está vinculada a uma fatura, explique que a baixa correta é na fatura inteira ou que a parcela precisa ser desvinculada antes da baixa individual.

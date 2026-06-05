@@ -7,6 +7,8 @@ public record SavingsJarSummaryResponse(
         BigDecimal totalSaved,
         BigDecimal totalTarget,
         BigDecimal totalYield,
+        BigDecimal monthlyPlannedContribution,
+        BigDecimal monthlyActualContribution,
         BigDecimal remainingToTargets,
         BigDecimal averageProgressPercentage,
         Integer totalJars,

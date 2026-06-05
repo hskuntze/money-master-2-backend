@@ -50,11 +50,23 @@ public class RefreshTokenService {
                 .orElseThrow(() -> new BusinessException("Refresh token inválido."));
 
         if (token.isRevoked() || token.isExpired()) {
-            throw new BusinessException("Refresh token expirado ou revogado.");
+            throw new BusinessException("Refresh token inválido.");
         }
 
         token.setRevokedAt(Instant.now());
         return token.getUser();
+    }
+
+
+    @Transactional
+    public void revoke(String rawToken) {
+        if (rawToken == null || rawToken.isBlank()) {
+            return;
+        }
+        String tokenHash = tokenHashService.sha256(rawToken);
+        refreshTokenRepository.findByTokenHash(tokenHash)
+                .filter(token -> !token.isRevoked())
+                .ifPresent(token -> token.setRevokedAt(Instant.now()));
     }
 
     @Transactional

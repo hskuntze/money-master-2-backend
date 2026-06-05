@@ -16,21 +16,34 @@ import br.com.kuntzedevprojects.money_master_2.dtos.finance.CategoryReportRespon
 import br.com.kuntzedevprojects.money_master_2.dtos.finance.ComparativeReportResponse;
 import br.com.kuntzedevprojects.money_master_2.dtos.finance.DailyCashFlowResponse;
 import br.com.kuntzedevprojects.money_master_2.dtos.finance.FinancialSummaryResponse;
+import br.com.kuntzedevprojects.money_master_2.dtos.finance.dashboard.MonthlyDashboardResponse;
+import br.com.kuntzedevprojects.money_master_2.dtos.finance.report.MonthlySemanticReportResponse;
+import br.com.kuntzedevprojects.money_master_2.dtos.savingsjar.SavingsJarSummaryResponse;
 import br.com.kuntzedevprojects.money_master_2.entities.Category;
 import br.com.kuntzedevprojects.money_master_2.entities.FinancialTransaction;
 import br.com.kuntzedevprojects.money_master_2.enums.TransactionType;
 import br.com.kuntzedevprojects.money_master_2.exceptions.BusinessException;
 import br.com.kuntzedevprojects.money_master_2.repositories.FinancialTransactionRepository;
+import br.com.kuntzedevprojects.money_master_2.services.finance.dashboard.MonthlyDashboardService;
 
 @Service
 public class FinancialReportService {
 
     private final FinancialTransactionRepository transactionRepository;
     private final AccountService accountService;
+    private final MonthlyDashboardService monthlyDashboardService;
+    private final SavingsJarService savingsJarService;
 
-    public FinancialReportService(FinancialTransactionRepository transactionRepository, AccountService accountService) {
+    public FinancialReportService(
+            FinancialTransactionRepository transactionRepository,
+            AccountService accountService,
+            MonthlyDashboardService monthlyDashboardService,
+            SavingsJarService savingsJarService
+    ) {
         this.transactionRepository = transactionRepository;
         this.accountService = accountService;
+        this.monthlyDashboardService = monthlyDashboardService;
+        this.savingsJarService = savingsJarService;
     }
 
     @Transactional(readOnly = true)
@@ -101,6 +114,58 @@ public class FinancialReportService {
                 second.incomeTotal().subtract(first.incomeTotal()),
                 second.expenseTotal().subtract(first.expenseTotal()),
                 second.netResult().subtract(first.netResult())
+        );
+    }
+
+    @Transactional(readOnly = true)
+    public MonthlySemanticReportResponse monthlySemantic(String ownerEmail, Long cycleId) {
+        MonthlyDashboardResponse dashboard = monthlyDashboardService.get(ownerEmail, cycleId);
+        SavingsJarSummaryResponse savings = savingsJarService.summary(ownerEmail);
+        LocalDate from = dashboard.cycle().startDate();
+        LocalDate to = dashboard.cycle().endDate();
+
+        return new MonthlySemanticReportResponse(
+                dashboard.cycle(),
+                new MonthlySemanticReportResponse.PlanningSection(
+                        dashboard.plannedIncomeTotal(),
+                        dashboard.plannedPayablesTotal(),
+                        dashboard.creditCardInvoicesTotal(),
+                        dashboard.savingsPlannedTotal(),
+                        dashboard.plannedAvailableAmount()
+                ),
+                new MonthlySemanticReportResponse.RealizedSection(
+                        dashboard.receivedIncomeTotal(),
+                        dashboard.paidPayablesTotal(),
+                        dashboard.creditCardInvoicesPaidTotal(),
+                        dashboard.savingsActualTotal(),
+                        dashboard.unplannedIncomeTotal(),
+                        dashboard.unplannedExpenseTotal(),
+                        dashboard.realizedAvailableAmount()
+                ),
+                new MonthlySemanticReportResponse.CreditCardSection(
+                        dashboard.creditCardInvoicesTotal(),
+                        dashboard.creditCardInvoicesPaidTotal(),
+                        dashboard.creditCardInvoicesPendingTotal()
+                ),
+                new MonthlySemanticReportResponse.InstallmentSection(
+                        dashboard.installmentsCurrentMonthTotal(),
+                        dashboard.installmentsFutureTotal(),
+                        dashboard.anticipatedInstallmentsTotal()
+                ),
+                new MonthlySemanticReportResponse.SavingsJarSection(
+                        savings.totalSaved(),
+                        savings.totalTarget(),
+                        dashboard.savingsPlannedTotal(),
+                        dashboard.savingsActualTotal(),
+                        savings.totalYield(),
+                        savings.averageProgressPercentage()
+                ),
+                dashboard.cashBalanceCurrent(),
+                dashboard.projectedAvailableAmount(),
+                dailyCashFlow(ownerEmail, from, to),
+                byCategory(ownerEmail, from, to, TransactionType.EXPENSE),
+                byCategory(ownerEmail, from, to, TransactionType.INCOME),
+                dashboard.alerts()
         );
     }
 

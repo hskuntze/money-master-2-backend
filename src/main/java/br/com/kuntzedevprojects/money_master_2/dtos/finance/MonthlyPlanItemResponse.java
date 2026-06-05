@@ -9,6 +9,7 @@ import br.com.kuntzedevprojects.money_master_2.entities.Account;
 import br.com.kuntzedevprojects.money_master_2.entities.Category;
 import br.com.kuntzedevprojects.money_master_2.entities.MonthlyPlanItem;
 import br.com.kuntzedevprojects.money_master_2.enums.MonthlyPlanItemAggregationType;
+import br.com.kuntzedevprojects.money_master_2.enums.MonthlyPlanItemInvoiceContributionMode;
 import br.com.kuntzedevprojects.money_master_2.enums.MonthlyPlanItemNature;
 import br.com.kuntzedevprojects.money_master_2.enums.MonthlyPlanItemSettlementOrigin;
 import br.com.kuntzedevprojects.money_master_2.enums.MonthlyPlanItemStatus;
@@ -25,6 +26,10 @@ public record MonthlyPlanItemResponse(
         BigDecimal expectedAmount,
         BigDecimal actualAmount,
         BigDecimal remainingAmount,
+        BigDecimal invoiceBaseAmount,
+        MonthlyPlanItemInvoiceContributionMode invoiceContributionMode,
+        BigDecimal invoiceAddedToTotal,
+        BigDecimal invoiceCompositionOnlyTotal,
         LocalDate dueDate,
         LocalDate paidOn,
         MonthlyPlanItemStatus status,
@@ -73,10 +78,28 @@ public record MonthlyPlanItemResponse(
                 .map(MonthlyPlanItemResponse::actualAmount)
                 .map(MonthlyPlanItemResponse::nullToZero)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
-        BigDecimal childDifference = expected.subtract(childExpectedTotal);
+        BigDecimal invoiceAddedToTotal = safeChildren.stream()
+                .filter(child -> child.invoiceContributionMode() == MonthlyPlanItemInvoiceContributionMode.ADDS_TO_INVOICE_TOTAL)
+                .map(MonthlyPlanItemResponse::expectedAmount)
+                .map(MonthlyPlanItemResponse::nullToZero)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        BigDecimal invoiceCompositionOnlyTotal = safeChildren.stream()
+                .filter(child -> child.invoiceContributionMode() != MonthlyPlanItemInvoiceContributionMode.ADDS_TO_INVOICE_TOTAL)
+                .map(MonthlyPlanItemResponse::expectedAmount)
+                .map(MonthlyPlanItemResponse::nullToZero)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
         MonthlyPlanItemAggregationType aggregationType = item.getAggregationType() == null
                 ? MonthlyPlanItemAggregationType.NORMAL
                 : item.getAggregationType();
+        MonthlyPlanItemInvoiceContributionMode contributionMode = item.getInvoiceContributionMode() == null
+                ? MonthlyPlanItemInvoiceContributionMode.COMPOSITION_ONLY
+                : item.getInvoiceContributionMode();
+        BigDecimal invoiceBaseAmount = aggregationType == MonthlyPlanItemAggregationType.GROUP_PARENT
+                ? nullToZero(item.getInvoiceBaseAmount() == null ? item.getExpectedAmount() : item.getInvoiceBaseAmount())
+                : null;
+        BigDecimal childDifference = aggregationType == MonthlyPlanItemAggregationType.GROUP_PARENT
+                ? nullToZero(invoiceBaseAmount).subtract(childExpectedTotal)
+                : expected.subtract(childExpectedTotal);
         return new MonthlyPlanItemResponse(
                 item.getId(),
                 item.getFinancialPeriod().getId(),
@@ -88,6 +111,10 @@ public record MonthlyPlanItemResponse(
                 expected,
                 actual,
                 remaining,
+                invoiceBaseAmount,
+                contributionMode,
+                invoiceAddedToTotal,
+                invoiceCompositionOnlyTotal,
                 item.getDueDate(),
                 item.getPaidOn(),
                 item.getStatus(),

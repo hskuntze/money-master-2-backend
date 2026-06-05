@@ -1,6 +1,7 @@
 package br.com.kuntzedevprojects.money_master_2.services;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.UncheckedIOException;
 import java.net.MalformedURLException;
 import java.nio.file.Files;
@@ -42,6 +43,7 @@ public class UserService {
     private final UserRepository userRepository;
     private final RoleRepository roleRepository;
     private final PasswordEncoder passwordEncoder;
+    private final PasswordPolicyService passwordPolicyService;
     private final Path avatarStoragePath;
     private final long maxAvatarSizeBytes;
 
@@ -49,12 +51,14 @@ public class UserService {
             UserRepository userRepository,
             RoleRepository roleRepository,
             PasswordEncoder passwordEncoder,
+            PasswordPolicyService passwordPolicyService,
             @Value("${money-master.upload.base-dir:uploads}") String uploadBaseDir,
             @Value("${money-master.upload.avatar.max-size-bytes:2097152}") long maxAvatarSizeBytes
     ) {
         this.userRepository = userRepository;
         this.roleRepository = roleRepository;
         this.passwordEncoder = passwordEncoder;
+        this.passwordPolicyService = passwordPolicyService;
         this.avatarStoragePath = Paths.get(uploadBaseDir).toAbsolutePath().normalize().resolve("avatars");
         this.maxAvatarSizeBytes = maxAvatarSizeBytes;
     }
@@ -74,6 +78,7 @@ public class UserService {
 
     @Transactional
     public UserResponse create(UserCreateRequest request) {
+        passwordPolicyService.validate(request.password());
         if (userRepository.existsByEmailIgnoreCase(request.email())) {
             throw new BusinessException("Já existe usuário cadastrado com este e-mail.");
         }
@@ -229,6 +234,45 @@ public class UserService {
         if (!ALLOWED_AVATAR_CONTENT_TYPES.contains(contentType)) {
             throw new BusinessException("A foto de perfil deve ser uma imagem JPG, PNG ou WEBP.");
         }
+        if (!hasExpectedImageSignature(file, contentType)) {
+            throw new BusinessException("O conteúdo do arquivo não corresponde a uma imagem válida.");
+        }
+    }
+
+    private boolean hasExpectedImageSignature(MultipartFile file, String contentType) {
+        byte[] header = new byte[12];
+        int read;
+        try (InputStream input = file.getInputStream()) {
+            read = input.read(header);
+        } catch (IOException ex) {
+            throw new UncheckedIOException("Não foi possível validar a foto de perfil.", ex);
+        }
+
+        if (read < 4) {
+            return false;
+        }
+        return switch (contentType) {
+            case "image/jpeg" -> (header[0] & 0xFF) == 0xFF && (header[1] & 0xFF) == 0xD8 && (header[2] & 0xFF) == 0xFF;
+            case "image/png" -> read >= 8
+                    && (header[0] & 0xFF) == 0x89
+                    && (header[1] & 0xFF) == 0x50
+                    && (header[2] & 0xFF) == 0x4E
+                    && (header[3] & 0xFF) == 0x47
+                    && (header[4] & 0xFF) == 0x0D
+                    && (header[5] & 0xFF) == 0x0A
+                    && (header[6] & 0xFF) == 0x1A
+                    && (header[7] & 0xFF) == 0x0A;
+            case "image/webp" -> read >= 12
+                    && (header[0] & 0xFF) == 0x52
+                    && (header[1] & 0xFF) == 0x49
+                    && (header[2] & 0xFF) == 0x46
+                    && (header[3] & 0xFF) == 0x46
+                    && (header[8] & 0xFF) == 0x57
+                    && (header[9] & 0xFF) == 0x45
+                    && (header[10] & 0xFF) == 0x42
+                    && (header[11] & 0xFF) == 0x50;
+            default -> false;
+        };
     }
 
     private String normalizedContentType(String contentType) {

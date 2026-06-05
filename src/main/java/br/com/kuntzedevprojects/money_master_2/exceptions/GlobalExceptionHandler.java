@@ -18,15 +18,18 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 import br.com.kuntzedevprojects.money_master_2.dtos.common.ApiError;
 import br.com.kuntzedevprojects.money_master_2.dtos.common.FieldErrorDetail;
 import br.com.kuntzedevprojects.money_master_2.services.FailureLogService;
+import br.com.kuntzedevprojects.money_master_2.services.SecurityAuditService;
 import jakarta.servlet.http.HttpServletRequest;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
     private final FailureLogService failureLogService;
+    private final SecurityAuditService securityAuditService;
 
-    public GlobalExceptionHandler(FailureLogService failureLogService) {
+    public GlobalExceptionHandler(FailureLogService failureLogService, SecurityAuditService securityAuditService) {
         this.failureLogService = failureLogService;
+        this.securityAuditService = securityAuditService;
     }
 
     @ExceptionHandler(ResourceNotFoundException.class)
@@ -41,19 +44,26 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(AccessDeniedException.class)
     ResponseEntity<ApiError> handleAccessDenied(AccessDeniedException ex, HttpServletRequest request) {
+        securityAuditService.record("ACCESS_DENIED", null, false, request, "Tentativa de acesso sem permissão suficiente.");
         return build(HttpStatus.FORBIDDEN, "Você não tem permissão para executar esta ação.", request, ex);
     }
 
     @ExceptionHandler({BadCredentialsException.class, DisabledException.class, LockedException.class, AuthenticationException.class})
     ResponseEntity<ApiError> handleAuthentication(RuntimeException ex, HttpServletRequest request) {
-        String message = "Não foi possível autenticar com as credenciais informadas.";
-        if (ex instanceof DisabledException) {
-            message = "Usuário desabilitado ou e-mail ainda não confirmado.";
-        }
-        if (ex instanceof LockedException) {
-            message = "Usuário bloqueado.";
-        }
-        return build(HttpStatus.UNAUTHORIZED, message, request, ex);
+        return build(HttpStatus.UNAUTHORIZED, "Não foi possível autenticar com as credenciais informadas.", request, ex);
+    }
+
+    @ExceptionHandler(RateLimitExceededException.class)
+    ResponseEntity<ApiError> handleRateLimit(RateLimitExceededException ex, HttpServletRequest request) {
+        failureLogService.record(ex, HttpStatus.TOO_MANY_REQUESTS, request, "Muitas requisições. Tente novamente mais tarde.");
+        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                .header("Retry-After", String.valueOf(ex.getRetryAfterSeconds()))
+                .body(ApiError.of(
+                        HttpStatus.TOO_MANY_REQUESTS.value(),
+                        HttpStatus.TOO_MANY_REQUESTS.getReasonPhrase(),
+                        "Muitas requisições. Tente novamente mais tarde.",
+                        request.getRequestURI()
+                ));
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)

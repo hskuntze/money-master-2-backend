@@ -52,6 +52,10 @@ public class InstallmentPurchaseEntry {
     @JoinColumn(name = "monthly_plan_item_id")
     private MonthlyPlanItem monthlyPlanItem;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "invoice_item_id")
+    private CreditCardInvoiceItem invoiceItem;
+
     @Column(nullable = false)
     private Integer installmentNumber;
 
@@ -66,6 +70,11 @@ public class InstallmentPurchaseEntry {
     private InstallmentEntryStatus status = InstallmentEntryStatus.PENDING;
 
     private LocalDate paidOn;
+
+    @Column(nullable = false)
+    private boolean anticipated = false;
+
+    private Instant anticipatedAt;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 30)
@@ -141,6 +150,14 @@ public class InstallmentPurchaseEntry {
         this.monthlyPlanItem = monthlyPlanItem;
     }
 
+    public CreditCardInvoiceItem getInvoiceItem() {
+        return invoiceItem;
+    }
+
+    public void setInvoiceItem(CreditCardInvoiceItem invoiceItem) {
+        this.invoiceItem = invoiceItem;
+    }
+
     public Integer getInstallmentNumber() {
         return installmentNumber;
     }
@@ -179,6 +196,22 @@ public class InstallmentPurchaseEntry {
 
     public void setPaidOn(LocalDate paidOn) {
         this.paidOn = paidOn;
+    }
+
+    public boolean isAnticipated() {
+        return anticipated;
+    }
+
+    public void setAnticipated(boolean anticipated) {
+        this.anticipated = anticipated;
+    }
+
+    public Instant getAnticipatedAt() {
+        return anticipatedAt;
+    }
+
+    public void setAnticipatedAt(Instant anticipatedAt) {
+        this.anticipatedAt = anticipatedAt;
     }
 
     public InstallmentPaymentSource getPaymentSource() {

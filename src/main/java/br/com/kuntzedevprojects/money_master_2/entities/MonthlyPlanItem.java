@@ -6,6 +6,7 @@ import java.time.LocalDate;
 
 import br.com.kuntzedevprojects.money_master_2.enums.MonthlyPlanItemAggregationType;
 import br.com.kuntzedevprojects.money_master_2.enums.MonthlyPlanItemNature;
+import br.com.kuntzedevprojects.money_master_2.enums.MonthlyPlanItemInvoiceContributionMode;
 import br.com.kuntzedevprojects.money_master_2.enums.MonthlyPlanItemSettlementOrigin;
 import br.com.kuntzedevprojects.money_master_2.enums.MonthlyPlanItemStatus;
 import br.com.kuntzedevprojects.money_master_2.enums.TransactionType;
@@ -76,6 +77,9 @@ public class MonthlyPlanItem {
     @Column(nullable = false, precision = 15, scale = 2)
     private BigDecimal actualAmount = BigDecimal.ZERO;
 
+    @Column(name = "invoice_base_amount", precision = 15, scale = 2)
+    private BigDecimal invoiceBaseAmount;
+
     @Column(name = "due_date", nullable = false)
     private LocalDate dueDate;
 
@@ -99,6 +103,10 @@ public class MonthlyPlanItem {
 
     @Column(name = "paid_by_parent", nullable = false)
     private boolean paidByParent = false;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "invoice_contribution_mode", nullable = false, length = 30)
+    private MonthlyPlanItemInvoiceContributionMode invoiceContributionMode = MonthlyPlanItemInvoiceContributionMode.COMPOSITION_ONLY;
 
     @Column(nullable = false)
     private boolean recurring = false;
@@ -228,6 +236,14 @@ public class MonthlyPlanItem {
         this.actualAmount = actualAmount;
     }
 
+    public BigDecimal getInvoiceBaseAmount() {
+        return invoiceBaseAmount;
+    }
+
+    public void setInvoiceBaseAmount(BigDecimal invoiceBaseAmount) {
+        this.invoiceBaseAmount = invoiceBaseAmount;
+    }
+
     public LocalDate getDueDate() {
         return dueDate;
     }
@@ -278,6 +294,14 @@ public class MonthlyPlanItem {
 
     public boolean isPaidByParent() {
         return paidByParent;
+    }
+
+    public MonthlyPlanItemInvoiceContributionMode getInvoiceContributionMode() {
+        return invoiceContributionMode;
+    }
+
+    public void setInvoiceContributionMode(MonthlyPlanItemInvoiceContributionMode invoiceContributionMode) {
+        this.invoiceContributionMode = invoiceContributionMode;
     }
 
     public void setPaidByParent(boolean paidByParent) {

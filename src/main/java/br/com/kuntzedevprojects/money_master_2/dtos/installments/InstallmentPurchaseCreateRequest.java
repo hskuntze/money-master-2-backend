@@ -3,6 +3,7 @@ package br.com.kuntzedevprojects.money_master_2.dtos.installments;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 
+import br.com.kuntzedevprojects.money_master_2.enums.InstallmentPaymentMode;
 import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
@@ -32,6 +33,10 @@ public record InstallmentPurchaseCreateRequest(
         LocalDate firstDueDate,
 
         Long categoryId,
+
+        InstallmentPaymentMode paymentMode,
+
+        Long creditCardId,
 
         @Size(max = 2000, message = "As observações devem ter no máximo 2000 caracteres.")
         String notes

@@ -18,6 +18,7 @@ import org.springframework.web.bind.annotation.RestController;
 import br.com.kuntzedevprojects.money_master_2.dtos.admin.AccessLogResponse;
 import br.com.kuntzedevprojects.money_master_2.dtos.admin.FailureLogDetailResponse;
 import br.com.kuntzedevprojects.money_master_2.dtos.admin.FailureLogResponse;
+import br.com.kuntzedevprojects.money_master_2.dtos.admin.SecurityAuditEventResponse;
 import br.com.kuntzedevprojects.money_master_2.services.AdminLogService;
 
 @RestController
@@ -53,6 +54,21 @@ public class AdminLogController {
             @PageableDefault(size = 25, sort = "occurredAt", direction = Sort.Direction.DESC) Pageable pageable
     ) {
         return ResponseEntity.ok(adminLogService.failureLogs(from, to, path, statusCode, principal, pageable));
+    }
+
+
+    @GetMapping("/security-events")
+    public ResponseEntity<Page<SecurityAuditEventResponse>> securityEvents(
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant from,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant to,
+            @RequestParam(required = false) String eventType,
+            @RequestParam(required = false) String path,
+            @RequestParam(required = false) String principal,
+            @RequestParam(required = false) String clientIp,
+            @RequestParam(required = false) Boolean success,
+            @PageableDefault(size = 25, sort = "occurredAt", direction = Sort.Direction.DESC) Pageable pageable
+    ) {
+        return ResponseEntity.ok(adminLogService.securityEvents(from, to, eventType, path, principal, clientIp, success, pageable));
     }
 
     @GetMapping("/failures/{id}")

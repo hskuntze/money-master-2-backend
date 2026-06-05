@@ -36,6 +36,8 @@ public interface InstallmentPurchaseEntryRepository extends JpaRepository<Instal
             join fetch e.purchase p
             left join fetch e.financialPeriod fp
             left join fetch e.monthlyPlanItem mpi
+            left join fetch e.invoiceItem invoiceItem
+            left join fetch invoiceItem.invoice invoice
             left join fetch mpi.parentItem parentItem
             left join fetch e.paidBy paidBy
             where e.id = :id
@@ -52,6 +54,8 @@ public interface InstallmentPurchaseEntryRepository extends JpaRepository<Instal
             join fetch e.purchase p
             left join fetch e.financialPeriod fp
             left join fetch e.monthlyPlanItem mpi
+            left join fetch e.invoiceItem invoiceItem
+            left join fetch invoiceItem.invoice invoice
             left join fetch mpi.parentItem parentItem
             left join fetch e.paidBy paidBy
             where lower(e.owner.email) = lower(:ownerEmail)
@@ -67,6 +71,8 @@ public interface InstallmentPurchaseEntryRepository extends JpaRepository<Instal
             join fetch e.purchase p
             left join fetch e.financialPeriod fp
             left join fetch e.monthlyPlanItem mpi
+            left join fetch e.invoiceItem invoiceItem
+            left join fetch invoiceItem.invoice invoice
             left join fetch mpi.parentItem parentItem
             left join fetch e.paidBy paidBy
             where lower(e.owner.email) = lower(:ownerEmail)
@@ -77,4 +83,24 @@ public interface InstallmentPurchaseEntryRepository extends JpaRepository<Instal
             @Param("ownerEmail") String ownerEmail
     );
 
+    @Query("""
+            select e
+            from InstallmentPurchaseEntry e
+            join fetch e.purchase p
+            left join fetch p.creditCard card
+            left join fetch p.category category
+            left join fetch e.financialPeriod fp
+            left join fetch e.monthlyPlanItem mpi
+            left join fetch e.invoiceItem invoiceItem
+            left join fetch invoiceItem.invoice invoice
+            where lower(e.owner.email) = lower(:ownerEmail)
+              and p.id = :purchaseId
+              and e.id in :ids
+            order by e.installmentNumber asc
+            """)
+    List<InstallmentPurchaseEntry> findSelectedByPurchaseAndOwnerEmail(
+            @Param("ownerEmail") String ownerEmail,
+            @Param("purchaseId") Long purchaseId,
+            @Param("ids") List<Long> ids
+    );
 }

@@ -24,6 +24,7 @@ import br.com.kuntzedevprojects.money_master_2.dtos.finance.FinancialTransaction
 import br.com.kuntzedevprojects.money_master_2.dtos.finance.MonthlyPeriodSummaryResponse;
 import br.com.kuntzedevprojects.money_master_2.dtos.finance.MonthlyPlanItemResponse;
 import br.com.kuntzedevprojects.money_master_2.dtos.finance.MonthlyPlanningContextResponse;
+import br.com.kuntzedevprojects.money_master_2.dtos.finance.report.MonthlySemanticReportResponse;
 import br.com.kuntzedevprojects.money_master_2.dtos.installments.InstallmentPurchaseResponse;
 import br.com.kuntzedevprojects.money_master_2.dtos.savingsjar.SavingsJarResponse;
 import br.com.kuntzedevprojects.money_master_2.dtos.savingsjar.SavingsJarSummaryResponse;
@@ -105,7 +106,17 @@ public class FinanceAiTools {
     }
 
 
-    @Tool(description = "Lista compras parceladas do usuário autenticado, com parcelas, status, quantas parcelas foram pagas e quantas ainda estão pendentes. Use antes de dar baixa em parcelas por linguagem natural quando houver nome livre ou possibilidade de ambiguidade.")
+    @Tool(description = "Obtem o relatorio mensal semantico do ciclo: planejamento, realizado, faturas, parcelas, cofrinhos, saldos e alertas. Use para responder analises do mes, dashboard, pendencias e impacto financeiro antes de sugerir comandos.")
+    public MonthlySemanticReportResponse getMonthlySemanticReport(
+            @ToolParam(description = "ID do ciclo financeiro. Pode ficar vazio para usar o ciclo atual/da data de referencia.") String periodId,
+            @ToolParam(description = "Data de referencia yyyy-MM-dd. Usada quando periodId estiver vazio. Pode ficar vazio para hoje.") String referenceDate
+    ) {
+        String ownerEmail = currentUserService.currentEmail();
+        FinancialPeriodResponse selectedPeriod = resolvePeriodForTool(ownerEmail, periodId, referenceDate);
+        return reportService.monthlySemantic(ownerEmail, selectedPeriod.id());
+    }
+
+    @Tool(description = "Lista compras parceladas do usuario autenticado, com parcelas, status, quantas parcelas foram pagas e quantas ainda estao pendentes. Use antes de dar baixa em parcelas por linguagem natural quando houver nome livre ou possibilidade de ambiguidade.")
     public List<InstallmentPurchaseResponse> listInstallmentPurchases() {
         return installmentPurchaseService.list(currentUserService.currentEmail());
     }

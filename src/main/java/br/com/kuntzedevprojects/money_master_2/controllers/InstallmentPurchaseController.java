@@ -16,9 +16,14 @@ import org.springframework.web.bind.annotation.RestController;
 
 import br.com.kuntzedevprojects.money_master_2.dtos.auth.MessageResponse;
 import br.com.kuntzedevprojects.money_master_2.dtos.installments.InstallmentEntryPaymentRequest;
+import br.com.kuntzedevprojects.money_master_2.dtos.installments.InstallmentAnticipationPreviewResponse;
+import br.com.kuntzedevprojects.money_master_2.dtos.installments.InstallmentAnticipationRequest;
+import br.com.kuntzedevprojects.money_master_2.dtos.installments.InstallmentAnticipationResponse;
+import br.com.kuntzedevprojects.money_master_2.dtos.installments.InstallmentPurchaseEntryResponse;
 import br.com.kuntzedevprojects.money_master_2.dtos.installments.InstallmentPurchaseCreateRequest;
 import br.com.kuntzedevprojects.money_master_2.dtos.installments.InstallmentPurchaseResponse;
 import br.com.kuntzedevprojects.money_master_2.services.InstallmentPurchaseService;
+import br.com.kuntzedevprojects.money_master_2.services.finance.installment.InstallmentAnticipationService;
 import jakarta.validation.Valid;
 
 @RestController
@@ -26,9 +31,11 @@ import jakarta.validation.Valid;
 public class InstallmentPurchaseController {
 
     private final InstallmentPurchaseService installmentPurchaseService;
+    private final InstallmentAnticipationService anticipationService;
 
-    public InstallmentPurchaseController(InstallmentPurchaseService installmentPurchaseService) {
+    public InstallmentPurchaseController(InstallmentPurchaseService installmentPurchaseService, InstallmentAnticipationService anticipationService) {
         this.installmentPurchaseService = installmentPurchaseService;
+        this.anticipationService = anticipationService;
     }
 
     @GetMapping
@@ -41,6 +48,47 @@ public class InstallmentPurchaseController {
     @PreAuthorize("hasAuthority('FINANCE_READ')")
     public ResponseEntity<InstallmentPurchaseResponse> get(@PathVariable Long id, Principal principal) {
         return ResponseEntity.ok(installmentPurchaseService.get(principal.getName(), id));
+    }
+
+    @GetMapping("/{id}/installments")
+    @PreAuthorize("hasAuthority('FINANCE_READ')")
+    public ResponseEntity<List<InstallmentPurchaseEntryResponse>> listInstallments(@PathVariable Long id, Principal principal) {
+        return ResponseEntity.ok(installmentPurchaseService.listInstallments(principal.getName(), id));
+    }
+
+    @GetMapping("/{id}/anticipation-preview")
+    @PreAuthorize("hasAuthority('FINANCE_READ')")
+    public ResponseEntity<InstallmentAnticipationPreviewResponse> anticipationPreview(
+            @PathVariable Long id,
+            @org.springframework.web.bind.annotation.RequestParam List<Long> installmentIds,
+            @org.springframework.web.bind.annotation.RequestParam(required = false) java.math.BigDecimal discountAmount,
+            @org.springframework.web.bind.annotation.RequestParam(required = false) java.math.BigDecimal anticipatedAmount,
+            @org.springframework.web.bind.annotation.RequestParam(required = false) Long targetInvoiceId,
+            Principal principal
+    ) {
+        return ResponseEntity.ok(anticipationService.preview(principal.getName(), id, installmentIds, discountAmount, anticipatedAmount, targetInvoiceId));
+    }
+
+    @PostMapping("/{id}/anticipations")
+    @PreAuthorize("hasAuthority('FINANCE_MANAGE')")
+    public ResponseEntity<InstallmentAnticipationResponse> anticipate(
+            @PathVariable Long id,
+            @Valid @RequestBody InstallmentAnticipationRequest request,
+            Principal principal
+    ) {
+        return ResponseEntity.status(HttpStatus.CREATED).body(anticipationService.anticipate(principal.getName(), id, request));
+    }
+
+    @GetMapping("/{id}/anticipations")
+    @PreAuthorize("hasAuthority('FINANCE_READ')")
+    public ResponseEntity<List<InstallmentAnticipationResponse>> listAnticipations(@PathVariable Long id, Principal principal) {
+        return ResponseEntity.ok(anticipationService.list(principal.getName(), id));
+    }
+
+    @PostMapping("/anticipations/{id}/cancel")
+    @PreAuthorize("hasAuthority('FINANCE_MANAGE')")
+    public ResponseEntity<InstallmentAnticipationResponse> cancelAnticipation(@PathVariable Long id, Principal principal) {
+        return ResponseEntity.ok(anticipationService.cancel(principal.getName(), id));
     }
 
     @PostMapping

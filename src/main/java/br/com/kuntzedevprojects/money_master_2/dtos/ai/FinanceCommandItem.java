@@ -1,6 +1,7 @@
 package br.com.kuntzedevprojects.money_master_2.dtos.ai;
 
 import java.math.BigDecimal;
+import java.util.List;
 
 import br.com.kuntzedevprojects.money_master_2.enums.MonthlyPlanItemNature;
 import br.com.kuntzedevprojects.money_master_2.enums.TransactionType;
@@ -27,12 +28,18 @@ public record FinanceCommandItem(
         BigDecimal targetAmount,
         String targetDate,
         Long financialPeriodId,
+        Long monthlyCycleId,
         Long monthlyPlanItemId,
+        Long monthlyPayableId,
+        Long monthlyIncomePlanId,
+        Long invoiceItemId,
+        Long creditCardInvoiceId,
         Long transactionId,
         String planItemDescription,
         String transactionDescription,
         String dueDate,
         String planItemNature,
+        String invoiceContributionMode,
         Boolean recurring,
         Boolean createIfMissing,
         Boolean createMissingPlanItems,
@@ -47,8 +54,15 @@ public record FinanceCommandItem(
         Integer installmentCount,
         Integer installmentsToPay,
         Integer targetPaidInstallments,
+        List<Long> installmentIds,
         Long installmentPurchaseId,
         String installmentPurchaseDescription,
+        Long targetInvoiceId,
+        Long accountId,
+        Long categoryId,
+        Long savingsJarId,
+        BigDecimal anticipatedAmount,
+        BigDecimal discountAmount,
         String paymentDate,
         String firstDueDate,
         String recurrenceEndDate,

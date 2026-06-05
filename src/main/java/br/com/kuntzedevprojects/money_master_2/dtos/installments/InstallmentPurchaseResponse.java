@@ -7,6 +7,7 @@ import java.util.List;
 
 import br.com.kuntzedevprojects.money_master_2.entities.InstallmentPurchase;
 import br.com.kuntzedevprojects.money_master_2.enums.InstallmentEntryStatus;
+import br.com.kuntzedevprojects.money_master_2.enums.InstallmentPaymentMode;
 import br.com.kuntzedevprojects.money_master_2.enums.InstallmentPurchaseStatus;
 
 public record InstallmentPurchaseResponse(
@@ -19,12 +20,17 @@ public record InstallmentPurchaseResponse(
         LocalDate firstDueDate,
         LocalDate lastDueDate,
         InstallmentPurchaseStatus status,
+        InstallmentPaymentMode paymentMode,
+        Long creditCardId,
+        String creditCardName,
+        Long firstInvoiceId,
         Long categoryId,
         String categoryName,
         String notes,
         Integer postedInstallments,
         Integer paidInstallments,
         Integer pendingInstallments,
+        Integer anticipatedInstallments,
         BigDecimal paidAmount,
         BigDecimal remainingAmount,
         List<InstallmentPurchaseEntryResponse> entries,
@@ -38,12 +44,14 @@ public record InstallmentPurchaseResponse(
                 .sorted(java.util.Comparator.comparing(entry -> entry.getInstallmentNumber() == null ? 0 : entry.getInstallmentNumber()))
                 .map(InstallmentPurchaseEntryResponse::from)
                 .toList();
-        int posted = (int) entryResponses.stream().filter(entry -> entry.monthlyPlanItemId() != null).count();
+        int posted = (int) entryResponses.stream().filter(entry -> entry.monthlyPlanItemId() != null || entry.invoiceItemId() != null).count();
         int paid = (int) purchase.getEntries().stream().filter(entry -> entry.getStatus() == InstallmentEntryStatus.PAID).count();
         int pending = (int) purchase.getEntries().stream()
                 .filter(entry -> entry.getStatus() != InstallmentEntryStatus.PAID)
                 .filter(entry -> entry.getStatus() != InstallmentEntryStatus.CANCELED)
+                .filter(entry -> entry.getStatus() != InstallmentEntryStatus.ANTICIPATED)
                 .count();
+        int anticipated = (int) purchase.getEntries().stream().filter(entry -> entry.isAnticipated()).count();
         BigDecimal paidAmount = purchase.getEntries().stream()
                 .filter(entry -> entry.getStatus() == InstallmentEntryStatus.PAID)
                 .map(entry -> entry.getAmount() == null ? BigDecimal.ZERO : entry.getAmount())
@@ -59,12 +67,17 @@ public record InstallmentPurchaseResponse(
                 purchase.getFirstDueDate(),
                 purchase.getLastDueDate(),
                 purchase.getStatus(),
+                purchase.getPaymentMode() == null ? InstallmentPaymentMode.DIRECT_PAYABLE : purchase.getPaymentMode(),
+                purchase.getCreditCard() == null ? null : purchase.getCreditCard().getId(),
+                purchase.getCreditCard() == null ? null : purchase.getCreditCard().getName(),
+                purchase.getFirstInvoice() == null ? null : purchase.getFirstInvoice().getId(),
                 purchase.getCategory() == null ? null : purchase.getCategory().getId(),
                 purchase.getCategory() == null ? null : purchase.getCategory().getName(),
                 purchase.getNotes(),
                 posted,
                 paid,
                 pending,
+                anticipated,
                 paidAmount,
                 remaining,
                 entryResponses,

@@ -17,6 +17,7 @@ import br.com.kuntzedevprojects.money_master_2.dtos.finance.CategoryReportRespon
 import br.com.kuntzedevprojects.money_master_2.dtos.finance.ComparativeReportResponse;
 import br.com.kuntzedevprojects.money_master_2.dtos.finance.DailyCashFlowResponse;
 import br.com.kuntzedevprojects.money_master_2.dtos.finance.FinancialSummaryResponse;
+import br.com.kuntzedevprojects.money_master_2.dtos.finance.report.MonthlySemanticReportResponse;
 import br.com.kuntzedevprojects.money_master_2.enums.TransactionType;
 import br.com.kuntzedevprojects.money_master_2.services.FinancialReportService;
 
@@ -77,5 +78,14 @@ public class FinancialReportController {
             Principal principal
     ) {
         return ResponseEntity.ok(reportService.compare(principal.getName(), fromA, toA, fromB, toB));
+    }
+
+    @GetMapping("/monthly-semantic")
+    @PreAuthorize("hasAuthority('FINANCE_READ')")
+    public ResponseEntity<MonthlySemanticReportResponse> monthlySemantic(
+            @RequestParam Long cycleId,
+            Principal principal
+    ) {
+        return ResponseEntity.ok(reportService.monthlySemantic(principal.getName(), cycleId));
     }
 }

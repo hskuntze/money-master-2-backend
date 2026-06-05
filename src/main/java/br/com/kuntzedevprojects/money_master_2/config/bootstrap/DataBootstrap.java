@@ -17,6 +17,7 @@ import br.com.kuntzedevprojects.money_master_2.entities.User;
 import br.com.kuntzedevprojects.money_master_2.repositories.RoleRepository;
 import br.com.kuntzedevprojects.money_master_2.repositories.ThemeRepository;
 import br.com.kuntzedevprojects.money_master_2.repositories.UserRepository;
+import br.com.kuntzedevprojects.money_master_2.services.PasswordPolicyService;
 
 @Component
 public class DataBootstrap implements ApplicationRunner {
@@ -28,19 +29,22 @@ public class DataBootstrap implements ApplicationRunner {
     private final RoleRepository roleRepository;
     private final ThemeRepository themeRepository;
     private final PasswordEncoder passwordEncoder;
+    private final PasswordPolicyService passwordPolicyService;
 
     public DataBootstrap(
             BootstrapAdminProperties properties,
             UserRepository userRepository,
             RoleRepository roleRepository,
             ThemeRepository themeRepository,
-            PasswordEncoder passwordEncoder
+            PasswordEncoder passwordEncoder,
+            PasswordPolicyService passwordPolicyService
     ) {
         this.properties = properties;
         this.userRepository = userRepository;
         this.roleRepository = roleRepository;
         this.themeRepository = themeRepository;
         this.passwordEncoder = passwordEncoder;
+        this.passwordPolicyService = passwordPolicyService;
     }
 
     @Override
@@ -65,6 +69,8 @@ public class DataBootstrap implements ApplicationRunner {
         if (userRepository.existsByEmailIgnoreCase(properties.getEmail())) {
             return;
         }
+
+        passwordPolicyService.validate(properties.getPassword());
 
         Role adminRole = roleRepository.findByName("ROLE_ADMIN")
                 .orElseThrow(() -> new IllegalStateException("ROLE_ADMIN não encontrada. Verifique a migration V2."));

@@ -7,6 +7,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import br.com.kuntzedevprojects.money_master_2.enums.InstallmentPurchaseStatus;
+import br.com.kuntzedevprojects.money_master_2.enums.InstallmentPaymentMode;
 import jakarta.persistence.CascadeType;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -46,6 +47,14 @@ public class InstallmentPurchase {
 	@JoinColumn(name = "category_id")
 	private Category category;
 
+	@ManyToOne(fetch = FetchType.LAZY)
+	@JoinColumn(name = "credit_card_id")
+	private CreditCard creditCard;
+
+	@ManyToOne(fetch = FetchType.LAZY)
+	@JoinColumn(name = "first_invoice_id")
+	private CreditCardInvoice firstInvoice;
+
 	@Column(nullable = false, length = 255)
 	private String description;
 
@@ -70,6 +79,10 @@ public class InstallmentPurchase {
 	@Enumerated(EnumType.STRING)
 	@Column(nullable = false, length = 30)
 	private InstallmentPurchaseStatus status = InstallmentPurchaseStatus.ACTIVE;
+
+	@Enumerated(EnumType.STRING)
+	@Column(nullable = false, length = 30)
+	private InstallmentPaymentMode paymentMode = InstallmentPaymentMode.DIRECT_PAYABLE;
 
 	@Column(length = 2000)
 	private String notes;
@@ -127,6 +140,22 @@ public class InstallmentPurchase {
 
 	public void setCategory(Category category) {
 		this.category = category;
+	}
+
+	public CreditCard getCreditCard() {
+		return creditCard;
+	}
+
+	public void setCreditCard(CreditCard creditCard) {
+		this.creditCard = creditCard;
+	}
+
+	public CreditCardInvoice getFirstInvoice() {
+		return firstInvoice;
+	}
+
+	public void setFirstInvoice(CreditCardInvoice firstInvoice) {
+		this.firstInvoice = firstInvoice;
 	}
 
 	public String getDescription() {
@@ -191,6 +220,14 @@ public class InstallmentPurchase {
 
 	public void setStatus(InstallmentPurchaseStatus status) {
 		this.status = status;
+	}
+
+	public InstallmentPaymentMode getPaymentMode() {
+		return paymentMode;
+	}
+
+	public void setPaymentMode(InstallmentPaymentMode paymentMode) {
+		this.paymentMode = paymentMode;
 	}
 
 	public String getNotes() {

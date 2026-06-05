@@ -35,7 +35,7 @@ public class FailureLogService {
             failureLog.setOccurredAt(Instant.now());
             failureLog.setMethod(request.getMethod());
             failureLog.setPath(request.getRequestURI());
-            failureLog.setQueryString(request.getQueryString());
+            failureLog.setQueryString(metadataExtractor.safeQueryString(request));
             failureLog.setStatusCode(status.value());
             failureLog.setPrincipal(metadataExtractor.principal(request));
             failureLog.setClientIp(metadataExtractor.clientIp(request));

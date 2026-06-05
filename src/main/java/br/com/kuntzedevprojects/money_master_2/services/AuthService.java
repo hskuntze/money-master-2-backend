@@ -1,10 +1,13 @@
 package br.com.kuntzedevprojects.money_master_2.services;
 
 import java.time.Instant;
+import java.util.Locale;
 import java.util.Set;
 
 import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -19,9 +22,12 @@ import br.com.kuntzedevprojects.money_master_2.entities.User;
 import br.com.kuntzedevprojects.money_master_2.exceptions.BusinessException;
 import br.com.kuntzedevprojects.money_master_2.repositories.RoleRepository;
 import br.com.kuntzedevprojects.money_master_2.repositories.UserRepository;
+import jakarta.servlet.http.HttpServletRequest;
 
 @Service
 public class AuthService {
+
+    private static final String GENERIC_AUTHENTICATION_MESSAGE = "Não foi possível autenticar com as credenciais informadas.";
 
     private final AuthenticationManager authenticationManager;
     private final UserRepository userRepository;
@@ -30,6 +36,9 @@ public class AuthService {
     private final JwtService jwtService;
     private final RefreshTokenService refreshTokenService;
     private final EmailConfirmationService emailConfirmationService;
+    private final PasswordPolicyService passwordPolicyService;
+    private final LoginAttemptService loginAttemptService;
+    private final SecurityAuditService securityAuditService;
 
     public AuthService(
             AuthenticationManager authenticationManager,
@@ -38,7 +47,10 @@ public class AuthService {
             PasswordEncoder passwordEncoder,
             JwtService jwtService,
             RefreshTokenService refreshTokenService,
-            EmailConfirmationService emailConfirmationService
+            EmailConfirmationService emailConfirmationService,
+            PasswordPolicyService passwordPolicyService,
+            LoginAttemptService loginAttemptService,
+            SecurityAuditService securityAuditService
     ) {
         this.authenticationManager = authenticationManager;
         this.userRepository = userRepository;
@@ -47,12 +59,20 @@ public class AuthService {
         this.jwtService = jwtService;
         this.refreshTokenService = refreshTokenService;
         this.emailConfirmationService = emailConfirmationService;
+        this.passwordPolicyService = passwordPolicyService;
+        this.loginAttemptService = loginAttemptService;
+        this.securityAuditService = securityAuditService;
     }
 
     @Transactional
-    public UserResponse register(AuthRegisterRequest request) {
-        if (userRepository.existsByEmailIgnoreCase(request.email())) {
-            throw new BusinessException("Já existe usuário cadastrado com este e-mail.");
+    public UserResponse register(AuthRegisterRequest request, HttpServletRequest servletRequest) {
+        passwordPolicyService.validate(request.password());
+        String email = normalizeEmail(request.email());
+
+        if (userRepository.existsByEmailIgnoreCase(email)) {
+            securityAuditService.record("REGISTER_DUPLICATE_EMAIL", email, false, servletRequest,
+                    "Tentativa de cadastro com e-mail já existente.");
+            throw new BusinessException("Não foi possível concluir o cadastro com os dados informados.");
         }
 
         Role defaultRole = roleRepository.findByName("ROLE_USER")
@@ -60,7 +80,7 @@ public class AuthService {
 
         User user = new User();
         user.setName(request.name());
-        user.setEmail(request.email());
+        user.setEmail(email);
         user.setPassword(passwordEncoder.encode(request.password()));
         user.setEnabled(false);
         user.setEmailVerified(false);
@@ -69,17 +89,29 @@ public class AuthService {
 
         User saved = userRepository.save(user);
         emailConfirmationService.createAndSend(saved);
+        securityAuditService.record("REGISTER_SUCCESS", email, true, servletRequest,
+                "Cadastro criado; aguardando confirmação de e-mail.");
         return UserResponse.from(saved);
     }
 
     @Transactional
-    public AuthResponse login(AuthLoginRequest request) {
-        authenticationManager.authenticate(new UsernamePasswordAuthenticationToken(request.email(), request.password()));
+    public AuthResponse login(AuthLoginRequest request, HttpServletRequest servletRequest) {
+        String email = normalizeEmail(request.email());
+        loginAttemptService.assertAllowed(email, servletRequest);
 
-        User user = userRepository.findByEmailIgnoreCase(request.email())
-                .orElseThrow(() -> new BusinessException("Usuário não encontrado."));
+        try {
+            authenticationManager.authenticate(new UsernamePasswordAuthenticationToken(email, request.password()));
+        } catch (AuthenticationException ex) {
+            loginAttemptService.recordFailure(email, servletRequest);
+            throw new BadCredentialsException(GENERIC_AUTHENTICATION_MESSAGE);
+        }
+
+        User user = userRepository.findByEmailIgnoreCase(email)
+                .orElseThrow(() -> new BadCredentialsException(GENERIC_AUTHENTICATION_MESSAGE));
 
         user.setLastLoginAt(Instant.now());
+        loginAttemptService.recordSuccess(email, servletRequest);
+
         JwtService.IssuedToken accessToken = jwtService.createAccessToken(user);
         String refreshToken = refreshTokenService.issue(user);
 
@@ -87,11 +119,19 @@ public class AuthService {
     }
 
     @Transactional
-    public AuthResponse refresh(AuthRefreshRequest request) {
+    public AuthResponse refresh(AuthRefreshRequest request, HttpServletRequest servletRequest) {
         User user = refreshTokenService.consume(request.refreshToken());
         JwtService.IssuedToken accessToken = jwtService.createAccessToken(user);
         String refreshToken = refreshTokenService.issue(user);
+        securityAuditService.record("REFRESH_TOKEN_ROTATED", user.getEmail(), true, servletRequest,
+                "Refresh token consumido e rotacionado.");
         return new AuthResponse("Bearer", accessToken.value(), accessToken.expiresAt(), refreshToken, UserResponse.from(user));
+    }
+
+    @Transactional
+    public void logout(String refreshToken, String principal, HttpServletRequest servletRequest) {
+        refreshTokenService.revoke(refreshToken);
+        securityAuditService.record("LOGOUT", principal, true, servletRequest, "Logout solicitado pelo usuário.");
     }
 
     @Transactional(readOnly = true)
@@ -107,14 +147,16 @@ public class AuthService {
     }
 
     @Transactional
-    public void resendConfirmation(String email) {
-        User user = userRepository.findByEmailIgnoreCase(email)
-                .orElseThrow(() -> new BusinessException("Usuário não encontrado."));
+    public void resendConfirmation(String email, HttpServletRequest servletRequest) {
+        String normalizedEmail = normalizeEmail(email);
+        userRepository.findByEmailIgnoreCase(normalizedEmail)
+                .filter(user -> !user.isEmailVerified())
+                .ifPresent(emailConfirmationService::createAndSend);
+        securityAuditService.record("EMAIL_CONFIRMATION_RESEND_REQUESTED", normalizedEmail, true, servletRequest,
+                "Solicitação pública de reenvio de confirmação processada com resposta genérica.");
+    }
 
-        if (user.isEmailVerified()) {
-            throw new BusinessException("Este e-mail já foi confirmado.");
-        }
-
-        emailConfirmationService.createAndSend(user);
+    private String normalizeEmail(String email) {
+        return email == null ? "" : email.trim().toLowerCase(Locale.ROOT);
     }
 }
