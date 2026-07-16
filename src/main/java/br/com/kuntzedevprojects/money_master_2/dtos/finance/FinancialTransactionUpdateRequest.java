@@ -9,6 +9,7 @@ import jakarta.validation.constraints.Size;
 
 public record FinancialTransactionUpdateRequest(
         Long accountId,
+        Long destinationAccountId,
         Long categoryId,
         Long financialPeriodId,
         Long monthlyPlanItemId,

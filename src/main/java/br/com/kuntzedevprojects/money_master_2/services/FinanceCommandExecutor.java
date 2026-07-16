@@ -43,6 +43,7 @@ import br.com.kuntzedevprojects.money_master_2.dtos.finance.MonthlyPlanReconcile
 import br.com.kuntzedevprojects.money_master_2.dtos.savingsjar.SavingsJarBalanceCorrectionResponse;
 import br.com.kuntzedevprojects.money_master_2.entities.AiChatConversation;
 import br.com.kuntzedevprojects.money_master_2.entities.AiCommandAudit;
+import br.com.kuntzedevprojects.money_master_2.entities.AiPrivacySettings;
 import br.com.kuntzedevprojects.money_master_2.entities.FinancialTransaction;
 import br.com.kuntzedevprojects.money_master_2.entities.User;
 import br.com.kuntzedevprojects.money_master_2.enums.AiCommandStatus;
@@ -78,6 +79,8 @@ public class FinanceCommandExecutor {
     private final SavingsJarContributionPlanService savingsJarContributionPlanService;
     private final FinancialTransactionRepository transactionRepository;
     private final AiCommandAuditRepository auditRepository;
+    private final AiCommandConfirmationService confirmationService;
+    private final AiPrivacySettingsService privacySettingsService;
     private final ObjectMapper objectMapper;
 
     public FinanceCommandExecutor(
@@ -96,6 +99,8 @@ public class FinanceCommandExecutor {
             SavingsJarContributionPlanService savingsJarContributionPlanService,
             FinancialTransactionRepository transactionRepository,
             AiCommandAuditRepository auditRepository,
+            AiCommandConfirmationService confirmationService,
+            AiPrivacySettingsService privacySettingsService,
             ObjectMapper objectMapper
     ) {
         this.currentUserService = currentUserService;
@@ -113,15 +118,18 @@ public class FinanceCommandExecutor {
         this.savingsJarContributionPlanService = savingsJarContributionPlanService;
         this.transactionRepository = transactionRepository;
         this.auditRepository = auditRepository;
+        this.confirmationService = confirmationService;
+        this.privacySettingsService = privacySettingsService;
         this.objectMapper = objectMapper;
     }
 
     @Transactional(readOnly = true)
     public FinanceContextResponse getContext(String ownerEmail, String fromText, String toText, Boolean includeRecentTransactions) {
+        AiPrivacySettings settings = privacySettingsService.requireChatAllowed(ownerEmail);
         LocalDate from = parseDateOrNull(fromText);
         LocalDate to = parseDateOrNull(toText);
         List<FinancialTransactionResponse> transactions = List.of();
-        if (Boolean.TRUE.equals(includeRecentTransactions)) {
+        if (Boolean.TRUE.equals(includeRecentTransactions) && settings.isShareRecentTransactions()) {
             LocalDate effectiveTo = to == null ? LocalDate.now() : to;
             LocalDate effectiveFrom = from == null ? effectiveTo.minusDays(30) : from;
             transactions = transactionService.search(ownerEmail, effectiveFrom, effectiveTo, null, null, null, null, null)
@@ -135,21 +143,21 @@ public class FinanceCommandExecutor {
                 from,
                 to,
                 accountService.list(ownerEmail),
-                reportService.accountBalances(ownerEmail),
+                settings.isShareMonthlySummary() ? reportService.accountBalances(ownerEmail) : List.of(),
                 categoryService.listAvailable(ownerEmail, null),
-                savingsJarService.list(ownerEmail),
+                settings.isShareSavingsGoals() ? savingsJarService.list(ownerEmail) : List.of(),
                 transactions,
                 Instant.now()
         );
     }
 
     public FinanceCommandBatchResponse preview(String ownerEmail, FinanceCommandBatchRequest request) {
-        FinanceCommandBatchRequest previewRequest = new FinanceCommandBatchRequest(true, request == null ? null : request.reason(), request == null ? null : request.commands());
+        FinanceCommandBatchRequest previewRequest = new FinanceCommandBatchRequest(true, request == null ? null : request.reason(), null, request == null ? null : request.commands());
         return process(ownerEmail, previewRequest);
     }
 
     public FinanceCommandBatchResponse execute(String ownerEmail, FinanceCommandBatchRequest request) {
-        FinanceCommandBatchRequest executeRequest = new FinanceCommandBatchRequest(false, request == null ? null : request.reason(), request == null ? null : request.commands());
+        FinanceCommandBatchRequest executeRequest = new FinanceCommandBatchRequest(false, request == null ? null : request.reason(), request == null ? null : request.confirmationToken(), request == null ? null : request.commands());
         return process(ownerEmail, executeRequest);
     }
 
@@ -157,17 +165,37 @@ public class FinanceCommandExecutor {
         if (request == null || request.commands() == null || request.commands().isEmpty()) {
             throw new BusinessException("Nenhum comando financeiro foi informado.");
         }
+        privacySettingsService.requireWriteAllowed(ownerEmail);
         boolean dryRun = request.isDryRun();
+        if (!dryRun && requiresServerConfirmation(request.commands())) {
+            try {
+                confirmationService.validateAndConsume(ownerEmail, request.commands(), request.confirmationToken());
+            } catch (BusinessException ex) {
+                return confirmationBlocked(ownerEmail, request.commands(), ex.getMessage());
+            }
+        }
         List<FinanceCommandResult> results = new ArrayList<>();
         for (FinanceCommandItem command : request.commands()) {
             results.add(processOne(ownerEmail, command, dryRun));
         }
-        boolean requiresConfirmation = dryRun && results.stream().anyMatch(FinanceCommandResult::requiresConfirmation);
+        boolean requiresConfirmation = dryRun && results.stream().anyMatch(result -> result.status() == AiCommandStatus.PREVIEWED && result.requiresConfirmation());
+        AiCommandConfirmationService.IssuedConfirmation confirmation = requiresConfirmation
+                ? confirmationService.create(ownerEmail, request.commands(), request.reason())
+                : null;
         long successCount = results.stream().filter(result -> result.status() == AiCommandStatus.EXECUTED || result.status() == AiCommandStatus.PREVIEWED).count();
         String summary = dryRun
                 ? "Prévia gerada para " + successCount + " comando(s)." + (requiresConfirmation ? " Confirme para executar." : "")
                 : "Execução concluída para " + successCount + " comando(s).";
-        return new FinanceCommandBatchResponse(dryRun, !dryRun, requiresConfirmation, summary, results, Instant.now());
+        return new FinanceCommandBatchResponse(
+                dryRun,
+                !dryRun,
+                requiresConfirmation,
+                summary,
+                results,
+                confirmation == null ? null : confirmation.token(),
+                confirmation == null ? null : confirmation.expiresAt(),
+                Instant.now()
+        );
     }
 
     private FinanceCommandResult processOne(String ownerEmail, FinanceCommandItem command, boolean dryRun) {
@@ -186,6 +214,7 @@ public class FinanceCommandExecutor {
                 case REGISTER_SAVINGS_JAR_YIELD -> registerSavingsJarYield(ownerEmail, command, dryRun);
                 case RECONCILE_SAVINGS_JAR_YIELD -> reconcileSavingsJarYield(ownerEmail, command, dryRun);
                 case RECONCILE_SAVINGS_JAR_BALANCE -> reconcileSavingsJarBalance(ownerEmail, command, dryRun);
+                case CREATE_SAVINGS_JAR -> createSavingsJar(ownerEmail, command, dryRun);
                 case CREATE_SAVINGS_JAR_CONTRIBUTION_PLAN -> createSavingsJarContributionPlan(ownerEmail, command, dryRun);
                 case CREATE_MONTHLY_PLAN_ITEM, CREATE_MONTHLY_INCOME_PLAN, CREATE_MONTHLY_PAYABLE -> createMonthlyPlanItem(ownerEmail, command, dryRun);
                 case PAY_MONTHLY_PLAN_ITEM -> payMonthlyPlanItem(ownerEmail, command, dryRun);
@@ -228,6 +257,7 @@ public class FinanceCommandExecutor {
                     "descricao", command.description(),
                     "data", command.occurredOn(),
                     "conta", command.accountName(),
+                    "contaDestino", command.destinationAccountName(),
                     "categoria", command.categoryName()
             ));
         }
@@ -238,6 +268,7 @@ public class FinanceCommandExecutor {
                 command.description(),
                 command.occurredOn(),
                 command.accountName(),
+                command.destinationAccountName(),
                 command.categoryName(),
                 originalMessage(command),
                 command.notes(),
@@ -318,6 +349,34 @@ public class FinanceCommandExecutor {
         }
         CategoryResponse response = categoryService.create(ownerEmail, new CategoryCreateRequest(categoryName(command), type, null, null, true));
         return executed(command.type(), "Categoria criada com sucesso.", mapOf("category", response));
+    }
+
+    private FinanceCommandResult createSavingsJar(String ownerEmail, FinanceCommandItem command, boolean dryRun) {
+        String name = required(command.savingsJarName(), "Informe o nome do cofrinho.");
+        if (dryRun) {
+            return previewed(command.type(), true, "Vou criar um cofrinho.", mapOf(
+                    "nome", name,
+                    "instituicao", command.institutionName(),
+                    "meta", command.targetAmount(),
+                    "dataAlvo", command.targetDate(),
+                    "saldoInicial", command.currentAmount(),
+                    "rendimentoAtual", command.currentYieldAmount(),
+                    "percentualCdi", command.cdiPercentage()
+            ));
+        }
+        ToolSavingsJarResponse response = savingsJarService.createFromAi(
+                ownerEmail,
+                name,
+                command.institutionName(),
+                command.targetAmount(),
+                command.targetDate(),
+                command.imageUrl(),
+                command.currentAmount(),
+                command.currentYieldAmount(),
+                command.cdiPercentage(),
+                originalMessage(command)
+        );
+        return executed(command.type(), response.message(), mapOf("savingsJar", response));
     }
 
     private FinanceCommandResult depositSavingsJar(String ownerEmail, FinanceCommandItem command, boolean dryRun) {
@@ -790,11 +849,47 @@ public class FinanceCommandExecutor {
     }
 
     private FinanceCommandResult previewed(FinanceCommandType type, boolean requiresConfirmation, String message, Map<String, Object> details) {
-        return new FinanceCommandResult(type, AiCommandStatus.PREVIEWED, message, requiresConfirmation, details);
+        return new FinanceCommandResult(type, AiCommandStatus.PREVIEWED, message, requiresConfirmation || requiresServerConfirmation(type), details);
     }
 
     private FinanceCommandResult executed(FinanceCommandType type, String message, Map<String, Object> details) {
         return new FinanceCommandResult(type, AiCommandStatus.EXECUTED, message, false, details);
+    }
+
+    private boolean requiresServerConfirmation(List<FinanceCommandItem> commands) {
+        return commands != null && commands.stream().anyMatch(command -> command != null && requiresServerConfirmation(command.type()));
+    }
+
+    private boolean requiresServerConfirmation(FinanceCommandType type) {
+        return type != null && type != FinanceCommandType.CREATE_CATEGORY;
+    }
+
+    private FinanceCommandBatchResponse confirmationBlocked(String ownerEmail, List<FinanceCommandItem> commands, String message) {
+        List<FinanceCommandResult> results = commands.stream()
+                .map(command -> new FinanceCommandResult(
+                        command == null ? null : command.type(),
+                        AiCommandStatus.SKIPPED,
+                        message,
+                        true,
+                        mapOf("reason", "CONFIRMATION_REQUIRED")
+                ))
+                .toList();
+        for (int index = 0; index < commands.size(); index++) {
+            FinanceCommandItem command = commands.get(index);
+            if (command != null) {
+                saveAudit(ownerEmail, command, results.get(index), false, null);
+            }
+        }
+        return new FinanceCommandBatchResponse(
+                false,
+                false,
+                true,
+                "Execucao bloqueada: " + message,
+                results,
+                null,
+                null,
+                Instant.now()
+        );
     }
 
     private void saveAudit(String ownerEmail, FinanceCommandItem command, FinanceCommandResult result, boolean dryRun, RuntimeException exception) {

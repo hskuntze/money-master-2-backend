@@ -11,6 +11,7 @@ import org.junit.jupiter.api.Test;
 
 import br.com.kuntzedevprojects.money_master_2.dtos.finance.MonthlyPeriodSummaryResponse;
 import br.com.kuntzedevprojects.money_master_2.entities.Account;
+import br.com.kuntzedevprojects.money_master_2.entities.CreditCardInvoiceItem;
 import br.com.kuntzedevprojects.money_master_2.entities.FinancialPeriod;
 import br.com.kuntzedevprojects.money_master_2.entities.FinancialTransaction;
 import br.com.kuntzedevprojects.money_master_2.entities.MonthlyPlanItem;
@@ -127,12 +128,32 @@ class MonthlyPeriodSummaryCalculatorTest {
     }
 
     @Test
-    void shouldIgnoreCreditCardPurchaseForProjectionWhenInvoiceExists() {
+    void shouldNotInferCreditCardPurchaseFromAccountTypeWhenInvoiceExists() {
         MonthlyPlanItem invoice = item(TransactionType.EXPENSE, "Fatura Nubank", "700.00", "0.00", MonthlyPlanItemStatus.PENDING);
         invoice.setAggregationType(MonthlyPlanItemAggregationType.GROUP_PARENT);
         invoice.setNature(MonthlyPlanItemNature.CREDIT_CARD);
         FinancialTransaction cardPurchase = transaction(TransactionType.EXPENSE, "Compra no cartao", "200.00");
         cardPurchase.setAccount(account(AccountType.CREDIT_CARD));
+
+        MonthlyPeriodSummaryResponse summary = calculator.calculate(period, List.of(invoice), List.of(cardPurchase));
+
+        assertAll(
+                () -> assertMoney("700.00", summary.plannedExpenseTotal()),
+                () -> assertMoney("200.00", summary.realizedExpenseTotal()),
+                () -> assertMoney("200.00", summary.unplannedExpenseTotal()),
+                () -> assertMoney("-900.00", summary.projectedAvailableAmount())
+        );
+    }
+
+    @Test
+    void shouldIgnoreStructurallyLinkedCreditCardPurchaseForProjection() {
+        MonthlyPlanItem invoice = item(TransactionType.EXPENSE, "Fatura Nubank", "700.00", "0.00", MonthlyPlanItemStatus.PENDING);
+        invoice.setAggregationType(MonthlyPlanItemAggregationType.GROUP_PARENT);
+        invoice.setNature(MonthlyPlanItemNature.CREDIT_CARD);
+        FinancialTransaction cardPurchase = transaction(TransactionType.EXPENSE, "Compra no cartao", "200.00");
+        CreditCardInvoiceItem invoiceItem = new CreditCardInvoiceItem();
+        invoiceItem.setId(77L);
+        cardPurchase.setCreditCardInvoiceItem(invoiceItem);
 
         MonthlyPeriodSummaryResponse summary = calculator.calculate(period, List.of(invoice), List.of(cardPurchase));
 

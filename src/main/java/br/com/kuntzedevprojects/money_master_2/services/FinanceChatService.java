@@ -15,6 +15,7 @@ import br.com.kuntzedevprojects.money_master_2.config.properties.FinanceAiProper
 import br.com.kuntzedevprojects.money_master_2.dtos.ai.FinanceChatResponse;
 import br.com.kuntzedevprojects.money_master_2.entities.AiChatConversation;
 import br.com.kuntzedevprojects.money_master_2.entities.AiChatMessage;
+import br.com.kuntzedevprojects.money_master_2.entities.AiPrivacySettings;
 import br.com.kuntzedevprojects.money_master_2.entities.User;
 import br.com.kuntzedevprojects.money_master_2.enums.AiChatMessageRole;
 import br.com.kuntzedevprojects.money_master_2.repositories.AiChatConversationRepository;
@@ -34,6 +35,7 @@ public class FinanceChatService {
     private final AiChatMessageRepository messageRepository;
     private final UserFinancialProfileService financialProfileService;
     private final FinancialReferenceService financialReferenceService;
+    private final AiPrivacySettingsService privacySettingsService;
 
     public FinanceChatService(
             ChatClient.Builder chatClientBuilder,
@@ -43,7 +45,8 @@ public class FinanceChatService {
             AiChatConversationRepository conversationRepository,
             AiChatMessageRepository messageRepository,
             UserFinancialProfileService financialProfileService,
-            FinancialReferenceService financialReferenceService
+            FinancialReferenceService financialReferenceService,
+            AiPrivacySettingsService privacySettingsService
     ) {
         this.chatClient = chatClientBuilder.build();
         this.financeAiTools = financeAiTools;
@@ -53,10 +56,13 @@ public class FinanceChatService {
         this.messageRepository = messageRepository;
         this.financialProfileService = financialProfileService;
         this.financialReferenceService = financialReferenceService;
+        this.privacySettingsService = privacySettingsService;
     }
 
     public FinanceChatResponse chat(String message, String conversationId) {
         String ownerEmail = currentUserService.currentEmail();
+        AiPrivacySettings privacySettings = privacySettingsService.requireChatAllowed(ownerEmail);
+        privacySettingsService.purgeExpiredChatMessages(ownerEmail, privacySettings);
         AiChatConversation conversation = resolveConversation(ownerEmail, conversationId, message);
         List<AiChatMessage> previousMessages = recentMessages(conversation);
 
@@ -66,7 +72,7 @@ public class FinanceChatService {
         try {
             answer = chatClient
                     .prompt()
-                    .system(systemPrompt(conversation, previousMessages, ownerEmail))
+                    .system(systemPrompt(conversation, previousMessages, ownerEmail, privacySettings))
                     .user(message)
                     .tools(financeAiTools)
                     .call()
@@ -134,8 +140,14 @@ public class FinanceChatService {
         return title.length() > 120 ? title.substring(0, 120) : title;
     }
 
-    private String systemPrompt(AiChatConversation conversation, List<AiChatMessage> previousMessages, String ownerEmail) {
+    private String systemPrompt(AiChatConversation conversation, List<AiChatMessage> previousMessages, String ownerEmail, AiPrivacySettings privacySettings) {
         LocalDate today = LocalDate.now(ZoneId.of(properties.getZoneId()));
+        String financialProfileContext = privacySettings.isShareFinancialProfile()
+                ? financialProfileService.buildPromptContext(ownerEmail)
+                : "(perfil financeiro nao compartilhado nas configuracoes de Privacidade IA)";
+        String financialReferenceContext = privacySettings.isShareFinancialProfile()
+                ? financialReferenceService.buildPromptContext(ownerEmail)
+                : "(referencias financeiras nao compartilhadas nas configuracoes de Privacidade IA)";
         return """
                 Você é o assistente financeiro do Money Master.
 
@@ -144,16 +156,20 @@ public class FinanceChatService {
                 - Data atual: %s.
                 - conversationId desta conversa: %s.
                 - Fase 11 ativa: prefira os comandos estruturados novos quando forem especificos: CREATE_MONTHLY_PAYABLE, CREATE_MONTHLY_INCOME_PLAN, REGISTER_PAYMENT, REGISTER_INCOME_RECEIPT, PAY_CREDIT_CARD_INVOICE, ANTICIPATE_INSTALLMENTS e CREATE_SAVINGS_JAR_CONTRIBUTION_PLAN.
-                - Antes de executar acoes sensiveis, gere previewFinanceCommands e espere confirmacao: pagar fatura, antecipar parcelas, criar compra parcelada, criar aporte planejado em cofrinho, movimentar cofrinho, reabrir/desfazer baixa, limpar transacoes ou reconciliar em lote.
+                - Antes de executar escritas financeiras sensiveis, gere previewFinanceCommands, mostre o impacto ao usuario e espere confirmacao. O backend so executa se executeFinanceCommands receber o confirmationToken retornado na previa, com o mesmo lote de comandos.
                 - Use getMonthlySemanticReport para analises do ciclo, dashboard, pendencias, faturas, parcelas, cofrinhos e impacto financeiro.
                 - Formato obrigatório de datas para ferramentas: yyyy-MM-dd.
                 - O usuário autenticado já é definido pelo backend. Nunca peça, invente ou aceite userId/e-mail como parâmetro.
                 - A conversa tem memória persistida no backend. Use o histórico abaixo para entender respostas curtas como "sim", "esses mesmos", "pode atualizar" ou "confirma".
                 - Perfil financeiro do usuário: %s
                 - Referências financeiras cadastradas/ativas: %s
+                - Privacidade IA: perfil compartilhado=%s; resumo mensal compartilhado=%s; transacoes recentes compartilhadas=%s; cofrinhos/metas compartilhados=%s; escritas pela IA=%s; mascarar valores sensiveis=%s.
 
                 Arquitetura de tools:
+                - Regra de seguranca: toda escrita financeira sensivel deve passar por previewFinanceCommands; executeFinanceCommands precisa receber o confirmationToken retornado pela previa e o mesmo lote de comandos.
+                - Se o usuario confirmar com "sim", "pode executar" ou frase equivalente, use o token da previa mais recente ainda valida desta conversa.
                 - Prefira usar getFinanceContext para consultar contas, saldos, categorias, cofrinhos e transações recentes antes de executar comandos com nomes livres.
+                - Se escritas pela IA=false em Privacidade IA, nao chame previewFinanceCommands nem executeFinanceCommands. Explique que alteracoes financeiras pela IA estao desativadas.
                 - Para operações de escrita, prefira montar comandos estruturados e usar previewFinanceCommands ou executeFinanceCommands.
                 - Use previewFinanceCommands quando houver alteração em lote, ambiguidade ou risco de mudar muitos dados.
                 - Use executeFinanceCommands quando a intenção estiver clara ou quando o usuário tiver confirmado uma prévia anterior.
@@ -164,6 +180,7 @@ public class FinanceChatService {
                 - Nunca use INCOME, EXPENSE, TRANSFER, RECEITA, DESPESA ou GASTO no campo commands[].type. Esses valores pertencem ao campo commands[].transactionType.
                 - Para registrar uma despesa/gasto avulso, use type=REGISTER_TRANSACTION e transactionType=EXPENSE.
                 - Para registrar uma receita/entrada avulsa, use type=REGISTER_TRANSACTION e transactionType=INCOME.
+                - Para registrar transferencia entre contas, use type=REGISTER_TRANSACTION, transactionType=TRANSFER, accountName como conta de origem e destinationAccountName como conta de destino. Transferencia nao e receita nem despesa.
                 - Para criar uma despesa planejada no ciclo mensal, use type=CREATE_MONTHLY_PLAN_ITEM e transactionType=EXPENSE.
                 - Para criar uma renda planejada no ciclo mensal, use type=CREATE_MONTHLY_PLAN_ITEM e transactionType=INCOME.
                 - Exemplo de despesa avulsa: {"type":"REGISTER_TRANSACTION","transactionType":"EXPENSE","amount":100.00,"description":"Mercado","occurredOn":"yyyy-MM-dd"}.
@@ -174,6 +191,7 @@ public class FinanceChatService {
                 - CHANGE_TRANSACTION_CATEGORY_BY_CATEGORY: trocar categoria de várias transações por categoria atual.
                 - CHANGE_TRANSACTION_CATEGORY_BY_DESCRIPTION_DATE: trocar categoria de uma transação por descrição e data.
                 - CREATE_CATEGORY: criar categoria personalizada do usuário.
+                - CREATE_SAVINGS_JAR: criar um cofrinho com meta, saldo inicial, rendimento inicial e percentual do CDI quando informados.
                 - DEPOSIT_SAVINGS_JAR: aportar em cofrinho.
                 - WITHDRAW_SAVINGS_JAR: retirar de cofrinho.
                 - REGISTER_SAVINGS_JAR_YIELD: somar um novo rendimento informado ao cofrinho.
@@ -269,8 +287,14 @@ public class FinanceChatService {
                 """.formatted(
                 today,
                 conversation.getConversationKey(),
-                financialProfileService.buildPromptContext(ownerEmail),
-                financialReferenceService.buildPromptContext(ownerEmail),
+                financialProfileContext,
+                financialReferenceContext,
+                privacySettings.isShareFinancialProfile(),
+                privacySettings.isShareMonthlySummary(),
+                privacySettings.isShareRecentTransactions(),
+                privacySettings.isShareSavingsGoals(),
+                privacySettings.isAllowWriteOperations(),
+                privacySettings.isMaskSensitiveValues(),
                 renderHistory(previousMessages)
         );
     }

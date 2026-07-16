@@ -16,6 +16,7 @@ import jakarta.persistence.Id;
 import jakarta.persistence.Index;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
+import jakarta.persistence.OneToOne;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
@@ -59,7 +60,9 @@ public class CreditCardInvoiceItem {
     private CreditCardInvoiceItemSourceType sourceType = CreditCardInvoiceItemSourceType.MANUAL;
     private Long sourceId;
     private Integer installmentNumber;
-    private Long transactionId;
+    @OneToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "transaction_id")
+    private FinancialTransaction transaction;
     @Column(length = 2000)
     private String notes;
     @Column(nullable = false, updatable = false)
@@ -93,8 +96,9 @@ public class CreditCardInvoiceItem {
     public void setSourceId(Long sourceId) { this.sourceId = sourceId; }
     public Integer getInstallmentNumber() { return installmentNumber; }
     public void setInstallmentNumber(Integer installmentNumber) { this.installmentNumber = installmentNumber; }
-    public Long getTransactionId() { return transactionId; }
-    public void setTransactionId(Long transactionId) { this.transactionId = transactionId; }
+    public FinancialTransaction getTransaction() { return transaction; }
+    public void setTransaction(FinancialTransaction transaction) { this.transaction = transaction; }
+    public Long getTransactionId() { return transaction == null ? null : transaction.getId(); }
     public String getNotes() { return notes; }
     public void setNotes(String notes) { this.notes = notes; }
     public Instant getCreatedAt() { return createdAt; }

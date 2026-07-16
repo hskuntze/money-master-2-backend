@@ -4,5 +4,6 @@ public enum MonthlyPlanItemNature {
     FIXED,
     VARIABLE,
     CREDIT_CARD,
-    SAVINGS_JAR
+    SAVINGS_JAR,
+    DEBT
 }

@@ -32,13 +32,16 @@ public interface FinancialTransactionRepository extends JpaRepository<FinancialT
             select t
             from FinancialTransaction t
             join fetch t.account a
+            left join fetch t.destinationAccount da
             left join fetch t.category c
             left join fetch t.financialPeriod fp
             left join fetch t.monthlyPlanItem mpi
+            left join fetch t.creditCardInvoiceItem ccii
+            left join fetch ccii.invoice cci
             where lower(t.owner.email) = lower(:ownerEmail)
               and (:from is null or t.occurredOn >= :from)
               and (:to is null or t.occurredOn <= :to)
-              and (:accountId is null or a.id = :accountId)
+              and (:accountId is null or a.id = :accountId or da.id = :accountId)
               and (:categoryId is null or c.id = :categoryId)
               and (:type is null or t.type = :type)
               and (:periodId is null or fp.id = :periodId)
@@ -60,13 +63,34 @@ public interface FinancialTransactionRepository extends JpaRepository<FinancialT
             select t
             from FinancialTransaction t
             join fetch t.account a
+            left join fetch t.destinationAccount da
             left join fetch t.category c
             left join fetch t.financialPeriod fp
             left join fetch t.monthlyPlanItem mpi
+            left join fetch t.creditCardInvoiceItem ccii
+            left join fetch ccii.invoice cci
             where t.id = :id
               and lower(t.owner.email) = lower(:ownerEmail)
             """)
     Optional<FinancialTransaction> findByIdAndOwnerEmailWithDetails(@Param("id") Long id, @Param("ownerEmail") String ownerEmail);
+
+    @Query("""
+            select coalesce(sum(t.amount), 0)
+            from FinancialTransaction t
+            where lower(t.owner.email) = lower(:ownerEmail)
+              and t.account.id = :accountId
+              and t.type = :type
+            """)
+    BigDecimal sumOutgoingTransfers(@Param("ownerEmail") String ownerEmail, @Param("accountId") Long accountId, @Param("type") TransactionType type);
+
+    @Query("""
+            select coalesce(sum(t.amount), 0)
+            from FinancialTransaction t
+            where lower(t.owner.email) = lower(:ownerEmail)
+              and t.destinationAccount.id = :accountId
+              and t.type = :type
+            """)
+    BigDecimal sumIncomingTransfers(@Param("ownerEmail") String ownerEmail, @Param("accountId") Long accountId, @Param("type") TransactionType type);
 
     @Query("""
             select coalesce(sum(t.amount), 0)
@@ -91,6 +115,7 @@ public interface FinancialTransactionRepository extends JpaRepository<FinancialT
             select t
             from FinancialTransaction t
             join fetch t.account a
+            left join fetch t.destinationAccount da
             left join fetch t.category c
             where lower(t.owner.email) = lower(:ownerEmail)
               and c is not null
@@ -112,6 +137,7 @@ public interface FinancialTransactionRepository extends JpaRepository<FinancialT
             select t
             from FinancialTransaction t
             join fetch t.account a
+            left join fetch t.destinationAccount da
             left join fetch t.category c
             where lower(t.owner.email) = lower(:ownerEmail)
               and t.occurredOn = :occurredOn
@@ -131,9 +157,12 @@ public interface FinancialTransactionRepository extends JpaRepository<FinancialT
             select t
             from FinancialTransaction t
             join fetch t.account a
+            left join fetch t.destinationAccount da
             left join fetch t.category c
             left join fetch t.financialPeriod fp
             left join fetch t.monthlyPlanItem mpi
+            left join fetch t.creditCardInvoiceItem ccii
+            left join fetch ccii.invoice cci
             where lower(t.owner.email) = lower(:ownerEmail)
               and (:periodId is null or fp.id = :periodId)
               and (:from is null or t.occurredOn >= :from)
@@ -155,9 +184,12 @@ public interface FinancialTransactionRepository extends JpaRepository<FinancialT
             select t
             from FinancialTransaction t
             join fetch t.account a
+            left join fetch t.destinationAccount da
             left join fetch t.category c
             left join fetch t.financialPeriod fp
             left join fetch t.monthlyPlanItem mpi
+            left join fetch t.creditCardInvoiceItem ccii
+            left join fetch ccii.invoice cci
             where mpi.id = :planItemId
             order by t.occurredOn asc, t.id asc
             """)
@@ -167,9 +199,12 @@ public interface FinancialTransactionRepository extends JpaRepository<FinancialT
             select t
             from FinancialTransaction t
             join fetch t.account a
+            left join fetch t.destinationAccount da
             left join fetch t.category c
             left join fetch t.financialPeriod fp
             left join fetch t.monthlyPlanItem mpi
+            left join fetch t.creditCardInvoiceItem ccii
+            left join fetch ccii.invoice cci
             where lower(t.owner.email) = lower(:ownerEmail)
               and fp.id = :periodId
               and t.type = :type

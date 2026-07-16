@@ -5,6 +5,7 @@ import java.util.List;
 public record FinanceCommandBatchRequest(
         Boolean dryRun,
         String reason,
+        String confirmationToken,
         List<FinanceCommandItem> commands
 ) {
     public boolean isDryRun() {

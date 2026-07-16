@@ -22,6 +22,7 @@ import br.com.kuntzedevprojects.money_master_2.entities.User;
 import br.com.kuntzedevprojects.money_master_2.exceptions.BusinessException;
 import br.com.kuntzedevprojects.money_master_2.repositories.RoleRepository;
 import br.com.kuntzedevprojects.money_master_2.repositories.UserRepository;
+import br.com.kuntzedevprojects.money_master_2.services.workspace.FinancialWorkspaceService;
 import jakarta.servlet.http.HttpServletRequest;
 
 @Service
@@ -39,6 +40,7 @@ public class AuthService {
     private final PasswordPolicyService passwordPolicyService;
     private final LoginAttemptService loginAttemptService;
     private final SecurityAuditService securityAuditService;
+    private final FinancialWorkspaceService workspaceService;
 
     public AuthService(
             AuthenticationManager authenticationManager,
@@ -50,7 +52,8 @@ public class AuthService {
             EmailConfirmationService emailConfirmationService,
             PasswordPolicyService passwordPolicyService,
             LoginAttemptService loginAttemptService,
-            SecurityAuditService securityAuditService
+            SecurityAuditService securityAuditService,
+            FinancialWorkspaceService workspaceService
     ) {
         this.authenticationManager = authenticationManager;
         this.userRepository = userRepository;
@@ -62,6 +65,7 @@ public class AuthService {
         this.passwordPolicyService = passwordPolicyService;
         this.loginAttemptService = loginAttemptService;
         this.securityAuditService = securityAuditService;
+        this.workspaceService = workspaceService;
     }
 
     @Transactional
@@ -88,6 +92,7 @@ public class AuthService {
         user.setRoles(Set.of(defaultRole));
 
         User saved = userRepository.save(user);
+        workspaceService.createPersonalWorkspaceFor(saved);
         emailConfirmationService.createAndSend(saved);
         securityAuditService.record("REGISTER_SUCCESS", email, true, servletRequest,
                 "Cadastro criado; aguardando confirmação de e-mail.");

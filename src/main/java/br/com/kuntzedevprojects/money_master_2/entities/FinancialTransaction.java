@@ -17,6 +17,7 @@ import jakarta.persistence.Id;
 import jakarta.persistence.Index;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
+import jakarta.persistence.OneToOne;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
@@ -27,6 +28,7 @@ import jakarta.persistence.Table;
         indexes = {
                 @Index(name = "idx_transaction_owner_date", columnList = "owner_id,occurred_on"),
                 @Index(name = "idx_transaction_account", columnList = "account_id"),
+                @Index(name = "idx_transaction_destination_account", columnList = "destination_account_id"),
                 @Index(name = "idx_transaction_category", columnList = "category_id"),
                 @Index(name = "idx_transaction_financial_period", columnList = "financial_period_id"),
                 @Index(name = "idx_transaction_monthly_plan_item", columnList = "monthly_plan_item_id")
@@ -47,6 +49,10 @@ public class FinancialTransaction {
     private Account account;
 
     @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "destination_account_id")
+    private Account destinationAccount;
+
+    @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "category_id")
     private Category category;
 
@@ -57,6 +63,9 @@ public class FinancialTransaction {
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "monthly_plan_item_id")
     private MonthlyPlanItem monthlyPlanItem;
+
+    @OneToOne(fetch = FetchType.LAZY, mappedBy = "transaction")
+    private CreditCardInvoiceItem creditCardInvoiceItem;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 30)
@@ -120,6 +129,14 @@ public class FinancialTransaction {
         this.account = account;
     }
 
+    public Account getDestinationAccount() {
+        return destinationAccount;
+    }
+
+    public void setDestinationAccount(Account destinationAccount) {
+        this.destinationAccount = destinationAccount;
+    }
+
     public Category getCategory() {
         return category;
     }
@@ -142,6 +159,14 @@ public class FinancialTransaction {
 
     public void setMonthlyPlanItem(MonthlyPlanItem monthlyPlanItem) {
         this.monthlyPlanItem = monthlyPlanItem;
+    }
+
+    public CreditCardInvoiceItem getCreditCardInvoiceItem() {
+        return creditCardInvoiceItem;
+    }
+
+    public void setCreditCardInvoiceItem(CreditCardInvoiceItem creditCardInvoiceItem) {
+        this.creditCardInvoiceItem = creditCardInvoiceItem;
     }
 
     public TransactionType getType() {

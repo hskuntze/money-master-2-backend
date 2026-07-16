@@ -120,6 +120,7 @@ public class MonthlyPlanReconciliationService {
 
         FinancialTransactionCreateRequest createRequest = new FinancialTransactionCreateRequest(
                 accountId,
+                null,
                 categoryId,
                 item.getFinancialPeriod().getId(),
                 item.getId(),

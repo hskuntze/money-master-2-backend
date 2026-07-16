@@ -14,6 +14,7 @@ import br.com.kuntzedevprojects.money_master_2.dtos.finance.creditcard.CreditCar
 import br.com.kuntzedevprojects.money_master_2.entities.Category;
 import br.com.kuntzedevprojects.money_master_2.entities.CreditCardInvoice;
 import br.com.kuntzedevprojects.money_master_2.entities.CreditCardInvoiceItem;
+import br.com.kuntzedevprojects.money_master_2.entities.FinancialTransaction;
 import br.com.kuntzedevprojects.money_master_2.enums.CreditCardInvoiceItemSourceType;
 import br.com.kuntzedevprojects.money_master_2.enums.TransactionType;
 import br.com.kuntzedevprojects.money_master_2.exceptions.BusinessException;
@@ -21,6 +22,7 @@ import br.com.kuntzedevprojects.money_master_2.exceptions.ResourceNotFoundExcept
 import br.com.kuntzedevprojects.money_master_2.repositories.CreditCardInvoiceItemRepository;
 import br.com.kuntzedevprojects.money_master_2.services.CategoryService;
 import br.com.kuntzedevprojects.money_master_2.services.CurrentUserService;
+import br.com.kuntzedevprojects.money_master_2.services.FinancialTransactionService;
 
 @Service
 public class CreditCardInvoiceItemService {
@@ -29,17 +31,20 @@ public class CreditCardInvoiceItemService {
     private final CreditCardInvoiceService invoiceService;
     private final CurrentUserService currentUserService;
     private final CategoryService categoryService;
+    private final FinancialTransactionService transactionService;
 
     public CreditCardInvoiceItemService(
             CreditCardInvoiceItemRepository itemRepository,
             CreditCardInvoiceService invoiceService,
             CurrentUserService currentUserService,
-            CategoryService categoryService
+            CategoryService categoryService,
+            FinancialTransactionService transactionService
     ) {
         this.itemRepository = itemRepository;
         this.invoiceService = invoiceService;
         this.currentUserService = currentUserService;
         this.categoryService = categoryService;
+        this.transactionService = transactionService;
     }
 
     @Transactional(readOnly = true)
@@ -53,20 +58,32 @@ public class CreditCardInvoiceItemService {
     @Transactional
     public CreditCardInvoiceItemResponse create(String ownerEmail, Long invoiceId, CreditCardInvoiceItemCreateRequest request) {
         CreditCardInvoice invoice = invoiceService.findOwnedInvoice(ownerEmail, invoiceId);
+        BigDecimal amount = normalizePositive(request.amount());
+        LocalDate purchaseDate = requiredDate(request.purchaseDate(), "A data da compra e obrigatoria.");
+        CreditCardInvoiceItemSourceType sourceType = normalizeSourceType(request.sourceType());
+        FinancialTransaction transaction = resolveLinkedTransaction(
+                ownerEmail,
+                request.transactionId(),
+                null,
+                sourceType,
+                amount,
+                purchaseDate
+        );
         CreditCardInvoiceItem item = new CreditCardInvoiceItem();
         item.setOwner(currentUserService.findUserByEmail(ownerEmail));
         item.setInvoice(invoice);
-        item.setCategory(resolveCategory(ownerEmail, request.categoryId()));
+        item.setCategory(resolveCategory(ownerEmail, request.categoryId(), transaction));
         item.setDescription(required(request.description()));
-        item.setAmount(normalizePositive(request.amount()));
-        item.setPurchaseDate(requiredDate(request.purchaseDate(), "A data da compra e obrigatoria."));
-        item.setCompetenceDate(request.competenceDate() == null ? request.purchaseDate() : request.competenceDate());
-        item.setSourceType(request.sourceType() == null ? CreditCardInvoiceItemSourceType.MANUAL : request.sourceType());
+        item.setAmount(amount);
+        item.setPurchaseDate(purchaseDate);
+        item.setCompetenceDate(request.competenceDate() == null ? purchaseDate : request.competenceDate());
+        item.setSourceType(sourceType);
         item.setSourceId(request.sourceId());
         item.setInstallmentNumber(request.installmentNumber());
-        item.setTransactionId(request.transactionId());
+        item.setTransaction(transaction);
         item.setNotes(optional(request.notes()));
         CreditCardInvoiceItem saved = itemRepository.save(item);
+        transactionService.markAsCreditCardInvoiceItem(ownerEmail, transaction);
         invoiceService.syncInvoiceTotals(ownerEmail, invoice);
         return CreditCardInvoiceItemResponse.from(saved);
     }
@@ -75,7 +92,7 @@ public class CreditCardInvoiceItemService {
     public CreditCardInvoiceItemResponse update(String ownerEmail, Long itemId, CreditCardInvoiceItemUpdateRequest request) {
         CreditCardInvoiceItem item = findOwnedItem(ownerEmail, itemId);
         if (request.categoryId() != null) {
-            item.setCategory(resolveCategory(ownerEmail, request.categoryId()));
+            item.setCategory(resolveCategory(ownerEmail, request.categoryId(), item.getTransaction()));
         }
         if (request.description() != null) {
             item.setDescription(required(request.description()));
@@ -90,7 +107,7 @@ public class CreditCardInvoiceItemService {
             item.setCompetenceDate(request.competenceDate());
         }
         if (request.sourceType() != null) {
-            item.setSourceType(request.sourceType());
+            item.setSourceType(normalizeSourceType(request.sourceType()));
         }
         if (request.sourceId() != null) {
             item.setSourceId(request.sourceId());
@@ -99,7 +116,19 @@ public class CreditCardInvoiceItemService {
             item.setInstallmentNumber(request.installmentNumber());
         }
         if (request.transactionId() != null) {
-            item.setTransactionId(request.transactionId());
+            FinancialTransaction transaction = resolveLinkedTransaction(
+                    ownerEmail,
+                    request.transactionId(),
+                    item.getId(),
+                    item.getSourceType(),
+                    item.getAmount(),
+                    item.getPurchaseDate()
+            );
+            item.setTransaction(transaction);
+            if (item.getCategory() == null && transaction.getCategory() != null) {
+                item.setCategory(transaction.getCategory());
+            }
+            transactionService.markAsCreditCardInvoiceItem(ownerEmail, transaction);
         }
         if (request.notes() != null) {
             item.setNotes(optional(request.notes()));
@@ -123,15 +152,52 @@ public class CreditCardInvoiceItemService {
                 .orElseThrow(() -> new ResourceNotFoundException("Item de fatura nao encontrado."));
     }
 
-    private Category resolveCategory(String ownerEmail, Long categoryId) {
+    private Category resolveCategory(String ownerEmail, Long categoryId, FinancialTransaction transaction) {
         if (categoryId == null) {
-            return null;
+            return transaction == null ? null : transaction.getCategory();
         }
         Category category = categoryService.findAvailableCategory(ownerEmail, categoryId);
         if (category.getType() != TransactionType.EXPENSE) {
             throw new BusinessException("A categoria do item da fatura precisa ser de despesa.");
         }
         return category;
+    }
+
+    private FinancialTransaction resolveLinkedTransaction(
+            String ownerEmail,
+            Long transactionId,
+            Long ignoredItemId,
+            CreditCardInvoiceItemSourceType sourceType,
+            BigDecimal amount,
+            LocalDate purchaseDate
+    ) {
+        if (transactionId == null) {
+            return null;
+        }
+        if (itemRepository.existsByTransactionIdExcludingItem(transactionId, ignoredItemId)) {
+            throw new BusinessException("Esta transacao ja esta vinculada a outro item de fatura.");
+        }
+        FinancialTransaction transaction = transactionService.findOwnedTransaction(ownerEmail, transactionId);
+        if (transaction.getType() != TransactionType.EXPENSE) {
+            throw new BusinessException("Somente despesas podem ser vinculadas como compra no cartao.");
+        }
+        if (sourceType == CreditCardInvoiceItemSourceType.CARD_PURCHASE
+                && amount != null
+                && transaction.getAmount() != null
+                && amount.compareTo(transaction.getAmount().setScale(2, RoundingMode.HALF_UP)) != 0) {
+            throw new BusinessException("O valor do item da fatura deve ser igual ao valor da transacao vinculada.");
+        }
+        if (sourceType == CreditCardInvoiceItemSourceType.CARD_PURCHASE
+                && purchaseDate != null
+                && transaction.getOccurredOn() != null
+                && !purchaseDate.equals(transaction.getOccurredOn())) {
+            throw new BusinessException("A data da compra deve ser igual a data da transacao vinculada.");
+        }
+        return transaction;
+    }
+
+    private CreditCardInvoiceItemSourceType normalizeSourceType(CreditCardInvoiceItemSourceType sourceType) {
+        return sourceType == null ? CreditCardInvoiceItemSourceType.CARD_PURCHASE : sourceType;
     }
 
     private String required(String value) {

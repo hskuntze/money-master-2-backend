@@ -9,6 +9,8 @@ public record FinanceCommandBatchResponse(
         boolean requiresConfirmation,
         String summary,
         List<FinanceCommandResult> results,
+        String confirmationToken,
+        Instant confirmationExpiresAt,
         Instant processedAt
 ) {
 }

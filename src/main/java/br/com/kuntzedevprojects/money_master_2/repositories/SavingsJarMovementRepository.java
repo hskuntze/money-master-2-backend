@@ -83,6 +83,8 @@ public interface SavingsJarMovementRepository extends JpaRepository<SavingsJarMo
 
     boolean existsBySavingsJarIdAndReferenceKey(Long savingsJarId, String referenceKey);
 
+    boolean existsBySavingsJarId(Long savingsJarId);
+
     Optional<SavingsJarMovement> findTopBySavingsJarIdAndTypeOrderByOccurredOnDescIdDesc(Long savingsJarId, SavingsJarMovementType type);
 
     @Query("""

@@ -254,15 +254,21 @@ public class SavingsJarService {
     }
 
     @Transactional
-    public void delete(String ownerEmail, Long id) {
+    public boolean delete(String ownerEmail, Long id) {
         SavingsJar jar = findOwnedJar(ownerEmail, id);
-        movementRepository.deleteBySavingsJarId(jar.getId());
+        if (movementRepository.existsBySavingsJarId(jar.getId())) {
+            jar.setActive(false);
+            jar.setYieldEnabled(false);
+            return false;
+        }
         savingsJarRepository.delete(jar);
+        return true;
     }
 
     @Transactional
     public SavingsJarMovementResponse deposit(String ownerEmail, Long id, SavingsJarMovementRequest request) {
         SavingsJar jar = findOwnedJar(ownerEmail, id);
+        ensureActive(jar);
         SavingsJarMovement movement = saveMovement(jar, SavingsJarMovementType.DEPOSIT, normalizeAmount(request.amount()),
                 request.occurredOn() == null ? today() : request.occurredOn(),
                 normalizeNullableOrDefault(request.description(), "Aporte no cofrinho"),
@@ -274,6 +280,7 @@ public class SavingsJarService {
     @Transactional
     public SavingsJarMovementResponse withdraw(String ownerEmail, Long id, SavingsJarMovementRequest request) {
         SavingsJar jar = findOwnedJar(ownerEmail, id);
+        ensureActive(jar);
         BigDecimal amount = normalizeAmount(request.amount());
         BigDecimal currentAmount = yieldService.currentAmount(jar.getId(), null);
         if (amount.compareTo(currentAmount) > 0) {
@@ -290,6 +297,7 @@ public class SavingsJarService {
     @Transactional
     public SavingsJarMovementResponse registerManualYield(String ownerEmail, Long id, SavingsJarMovementRequest request) {
         SavingsJar jar = findOwnedJar(ownerEmail, id);
+        ensureActive(jar);
         LocalDate occurredOn = request.occurredOn() == null ? today() : request.occurredOn();
         SavingsJarMovement movement = saveMovement(jar, SavingsJarMovementType.YIELD, normalizeAmount(request.amount()),
                 occurredOn,
@@ -312,6 +320,7 @@ public class SavingsJarService {
 
     private SavingsJarYieldCorrectionResponse correctYield(String ownerEmail, Long id, SavingsJarYieldCorrectionRequest request, TransactionSource source) {
         SavingsJar jar = findOwnedJar(ownerEmail, id);
+        ensureActive(jar);
         LocalDate occurredOn = request.occurredOn() == null ? today() : request.occurredOn();
         BigDecimal realYieldAmount = nullToZero(request.realYieldAmount()).setScale(2, RoundingMode.HALF_UP);
         if (realYieldAmount.signum() < 0) {
@@ -386,6 +395,7 @@ public class SavingsJarService {
     @Transactional
     public SavingsJarApplyYieldResponse applyPendingYield(String ownerEmail, Long id, LocalDate to) {
         SavingsJar jar = findOwnedJar(ownerEmail, id);
+        ensureActive(jar);
         return yieldService.applyPendingYields(jar, to);
     }
 
@@ -773,6 +783,12 @@ public class SavingsJarService {
                 && jar.getYieldCalculationType() == SavingsJarYieldCalculationType.CDI_PERCENTAGE
                 && (jar.getYieldPercentage() == null || jar.getYieldPercentage().signum() <= 0)) {
             throw new BusinessException("Informe o percentual do CDI para cofrinhos com rendimento automático por CDI.");
+        }
+    }
+
+    private void ensureActive(SavingsJar jar) {
+        if (!jar.isActive()) {
+            throw new BusinessException("Este cofrinho esta arquivado. Reative-o antes de registrar novas movimentacoes.");
         }
     }
 

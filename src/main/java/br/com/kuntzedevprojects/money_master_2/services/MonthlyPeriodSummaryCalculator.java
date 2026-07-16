@@ -3,7 +3,6 @@ package br.com.kuntzedevprojects.money_master_2.services;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.List;
-import java.util.Locale;
 
 import org.springframework.stereotype.Service;
 
@@ -80,55 +79,18 @@ public class MonthlyPeriodSummaryCalculator {
     }
 
     private BigDecimal sumUnplannedProjectedImpact(List<FinancialTransaction> transactions, List<MonthlyPlanItem> items, TransactionType type) {
-        boolean hasCreditCardPlanItem = items.stream().anyMatch(this::isCreditCardPlanItem);
         return transactions.stream()
                 .filter(transaction -> transaction.getType() == type)
                 .filter(transaction -> transaction.getMonthlyPlanItem() == null)
-                .filter(transaction -> !shouldIgnoreCreditCardPurchaseForProjection(transaction, hasCreditCardPlanItem))
+                .filter(transaction -> !isCreditCardPurchase(transaction))
                 .map(FinancialTransaction::getAmount)
                 .map(this::nullToZero)
                 .reduce(BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP), BigDecimal::add)
                 .setScale(2, RoundingMode.HALF_UP);
     }
 
-    private boolean shouldIgnoreCreditCardPurchaseForProjection(FinancialTransaction transaction, boolean hasCreditCardPlanItem) {
-        return hasCreditCardPlanItem && isCreditCardPurchase(transaction);
-    }
-
     private boolean isCreditCardPurchase(FinancialTransaction transaction) {
-        if (transaction.getType() != TransactionType.EXPENSE) {
-            return false;
-        }
-        String categoryName = transaction.getCategory() == null ? "" : transaction.getCategory().getName();
-        String accountType = transaction.getAccount() == null || transaction.getAccount().getType() == null
-                ? ""
-                : transaction.getAccount().getType().name();
-        return containsCreditCardText(categoryName) || "CREDIT_CARD".equals(accountType);
-    }
-
-    private boolean isCreditCardPlanItem(MonthlyPlanItem item) {
-        return item.getType() == TransactionType.EXPENSE
-                && item.getStatus() != MonthlyPlanItemStatus.CANCELED
-                && item.getAggregationType() == MonthlyPlanItemAggregationType.GROUP_PARENT;
-    }
-
-    private String normalizeComparable(String value) {
-        if (value == null) {
-            return "";
-        }
-        String normalized = java.text.Normalizer.normalize(value, java.text.Normalizer.Form.NFD)
-                .replaceAll("\\p{M}", "")
-                .toLowerCase(Locale.ROOT)
-                .replaceAll("[^a-z0-9]+", " ")
-                .trim();
-        return normalized.replaceAll("\\s+", " ");
-    }
-
-    private boolean containsCreditCardText(String value) {
-        String normalized = normalizeComparable(value);
-        return normalized.contains("cartao credito")
-                || normalized.contains("cartao de credito")
-                || normalized.contains("fatura cartao");
+        return transaction.getType() == TransactionType.EXPENSE && transaction.getCreditCardInvoiceItem() != null;
     }
 
     private BigDecimal sumExpected(List<MonthlyPlanItem> items, TransactionType type) {

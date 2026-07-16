@@ -91,6 +91,7 @@ public class FinancialTransactionService {
         Account account = request.accountId() == null
                 ? accountService.getOrCreateDefaultAccount(ownerEmail)
                 : accountService.findOwnedAccount(ownerEmail, request.accountId());
+        Account destinationAccount = resolveDestinationAccount(ownerEmail, account, request.type(), request.destinationAccountId());
         Category category = request.categoryId() == null ? null : categoryService.findAvailableCategory(ownerEmail, request.categoryId());
         FinancialPeriod period = request.financialPeriodId() == null
                 ? financialPeriodService.findOrCreateForDate(ownerEmail, request.occurredOn())
@@ -100,6 +101,7 @@ public class FinancialTransactionService {
                 : financialPeriodService.findOwnedPlanItem(ownerEmail, request.monthlyPlanItemId());
 
         if (planItem != null) {
+            ensureNotTransfer(request.type());
             ensureNotInvoiceChild(planItem);
             period = planItem.getFinancialPeriod();
             if (category == null) {
@@ -114,6 +116,7 @@ public class FinancialTransactionService {
         FinancialTransaction transaction = new FinancialTransaction();
         transaction.setOwner(owner);
         transaction.setAccount(account);
+        transaction.setDestinationAccount(destinationAccount);
         transaction.setCategory(category);
         transaction.setFinancialPeriod(period);
         transaction.setMonthlyPlanItem(planItem);
@@ -142,6 +145,9 @@ public class FinancialTransactionService {
         } else if (transaction.getAccount() == null) {
             transaction.setAccount(accountService.getOrCreateDefaultAccount(ownerEmail));
         }
+        if (request.destinationAccountId() != null) {
+            transaction.setDestinationAccount(accountService.findOwnedAccount(ownerEmail, request.destinationAccountId()));
+        }
         if (request.categoryId() != null) {
             Category category = categoryService.findAvailableCategory(ownerEmail, request.categoryId());
             validateCategoryType(category, request.type() == null ? transaction.getType() : request.type());
@@ -154,6 +160,7 @@ public class FinancialTransactionService {
             transaction.setMonthlyPlanItem(null);
         } else if (request.monthlyPlanItemId() != null) {
             MonthlyPlanItem planItem = financialPeriodService.findOwnedPlanItem(ownerEmail, request.monthlyPlanItemId());
+            ensureNotTransfer(request.type() == null ? transaction.getType() : request.type());
             ensureNotInvoiceChild(planItem);
             TransactionType targetType = request.type() == null ? transaction.getType() : request.type();
             if (planItem.getType() != targetType) {
@@ -172,6 +179,7 @@ public class FinancialTransactionService {
             }
             transaction.setType(request.type());
         }
+        normalizeTransfer(transaction);
         if (request.description() != null && !request.description().isBlank()) {
             transaction.setDescription(request.description().trim());
         }
@@ -215,7 +223,7 @@ public class FinancialTransactionService {
             String originalMessage,
             String notes
     ) {
-        return registerFromAi(ownerEmail, typeText, amount, description, occurredOnText, accountName, categoryName, originalMessage, notes, false);
+        return registerFromAi(ownerEmail, typeText, amount, description, occurredOnText, accountName, null, categoryName, originalMessage, notes, false);
     }
 
     @Transactional
@@ -226,6 +234,7 @@ public class FinancialTransactionService {
             String description,
             String occurredOnText,
             String accountName,
+            String destinationAccountName,
             String categoryName,
             String originalMessage,
             String notes,
@@ -235,11 +244,13 @@ public class FinancialTransactionService {
         TransactionType type = parseTransactionType(typeText);
         LocalDate occurredOn = parseDateOrToday(occurredOnText);
         Account account = accountService.resolveForAi(ownerEmail, null, accountName);
+        Account destinationAccount = resolveDestinationAccountForAi(ownerEmail, account, type, destinationAccountName);
         Category category = categoryService.resolveForAi(ownerEmail, null, categoryName, type);
 
         FinancialTransaction transaction = new FinancialTransaction();
         transaction.setOwner(owner);
         transaction.setAccount(account);
+        transaction.setDestinationAccount(destinationAccount);
         transaction.setCategory(category);
         transaction.setFinancialPeriod(financialPeriodService.findOrCreateForDate(ownerEmail, occurredOn));
         transaction.setType(type);
@@ -367,8 +378,26 @@ public class FinancialTransactionService {
                 .orElseThrow(() -> new ResourceNotFoundException("Lançamento financeiro não encontrado."));
     }
 
+    @Transactional
+    public void markAsCreditCardInvoiceItem(String ownerEmail, FinancialTransaction transaction) {
+        if (transaction == null) {
+            return;
+        }
+        if (!transaction.getOwner().getEmail().equalsIgnoreCase(ownerEmail)) {
+            throw new BusinessException("A transacao nao pertence ao usuario autenticado.");
+        }
+        MonthlyPlanItem previousPlanItem = transaction.getMonthlyPlanItem();
+        if (previousPlanItem != null) {
+            transaction.setMonthlyPlanItem(null);
+            financialPeriodService.synchronizePlanItemPayment(previousPlanItem);
+        }
+    }
+
     private void autoAttachToMonthlyPlanItem(String ownerEmail, FinancialTransaction transaction) {
         if (transaction.getMonthlyPlanItem() != null || transaction.getFinancialPeriod() == null) {
+            return;
+        }
+        if (transaction.getType() == TransactionType.TRANSFER) {
             return;
         }
         List<MonthlyPlanItem> candidates = planItemRepository.findActiveCandidatesByOwnerEmailAndPeriod(
@@ -397,28 +426,7 @@ public class FinancialTransactionService {
     }
 
     private boolean isCreditCardPurchase(FinancialTransaction transaction) {
-        if (transaction.getType() != TransactionType.EXPENSE) {
-            return false;
-        }
-        String categoryName = transaction.getCategory() == null ? "" : transaction.getCategory().getName();
-        String accountType = transaction.getAccount() == null || transaction.getAccount().getType() == null ? "" : transaction.getAccount().getType().name();
-        return containsCreditCardText(categoryName) || "CREDIT_CARD".equals(accountType);
-    }
-
-    private boolean isCreditCardPlanItem(MonthlyPlanItem item) {
-        String description = item.getDescription();
-        String categoryName = item.getCategory() == null ? "" : item.getCategory().getName();
-        return item.getType() == TransactionType.EXPENSE
-                && item.getStatus() != MonthlyPlanItemStatus.CANCELED
-                && (item.getAggregationType() == MonthlyPlanItemAggregationType.GROUP_PARENT
-                    || item.getNature() == MonthlyPlanItemNature.CREDIT_CARD
-                    || containsCreditCardText(description)
-                    || containsCreditCardText(categoryName));
-    }
-
-    private boolean containsCreditCardText(String value) {
-        String normalized = normalizeComparable(value);
-        return normalized.contains("cartao credito") || normalized.contains("cartao de credito") || normalized.contains("fatura cartao");
+        return transaction.getType() == TransactionType.EXPENSE && transaction.getCreditCardInvoiceItem() != null;
     }
 
     private int minimumAutoAttachScore(MonthlyPlanItem item) {
@@ -568,6 +576,62 @@ public class FinancialTransactionService {
     private void ensureNotInvoiceChild(MonthlyPlanItem item) {
         if (item.getAggregationType() == MonthlyPlanItemAggregationType.GROUP_CHILD && item.getParentItem() != null) {
             throw new BusinessException("Esta parcela está vinculada à fatura \"" + item.getParentItem().getDescription() + "\". Registre a baixa na fatura principal ou desvincule a parcela antes de associar uma transação individual.");
+        }
+    }
+
+    private Account resolveDestinationAccount(String ownerEmail, Account sourceAccount, TransactionType type, Long destinationAccountId) {
+        if (type != TransactionType.TRANSFER) {
+            if (destinationAccountId != null) {
+                throw new BusinessException("Conta de destino deve ser informada apenas para transferencias.");
+            }
+            return null;
+        }
+        if (destinationAccountId == null) {
+            throw new BusinessException("Informe a conta de destino da transferencia.");
+        }
+        Account destinationAccount = accountService.findOwnedAccount(ownerEmail, destinationAccountId);
+        if (sourceAccount.getId() != null && sourceAccount.getId().equals(destinationAccount.getId())) {
+            throw new BusinessException("A conta de destino deve ser diferente da conta de origem.");
+        }
+        return destinationAccount;
+    }
+
+    private Account resolveDestinationAccountForAi(String ownerEmail, Account sourceAccount, TransactionType type, String destinationAccountName) {
+        if (type != TransactionType.TRANSFER) {
+            if (destinationAccountName != null && !destinationAccountName.isBlank()) {
+                throw new BusinessException("Conta de destino deve ser informada apenas para transferencias.");
+            }
+            return null;
+        }
+        if (destinationAccountName == null || destinationAccountName.isBlank()) {
+            throw new BusinessException("Informe a conta de destino da transferencia.");
+        }
+        Account destinationAccount = accountService.resolveForAi(ownerEmail, null, destinationAccountName);
+        if (sourceAccount.getId() != null && sourceAccount.getId().equals(destinationAccount.getId())) {
+            throw new BusinessException("A conta de destino deve ser diferente da conta de origem.");
+        }
+        return destinationAccount;
+    }
+
+    private void normalizeTransfer(FinancialTransaction transaction) {
+        if (transaction.getType() != TransactionType.TRANSFER) {
+            transaction.setDestinationAccount(null);
+            return;
+        }
+        if (transaction.getMonthlyPlanItem() != null) {
+            throw new BusinessException("Transferencias entre contas nao devem ser vinculadas a contas ou receitas planejadas.");
+        }
+        if (transaction.getDestinationAccount() == null) {
+            throw new BusinessException("Informe a conta de destino da transferencia.");
+        }
+        if (transaction.getAccount().getId().equals(transaction.getDestinationAccount().getId())) {
+            throw new BusinessException("A conta de destino deve ser diferente da conta de origem.");
+        }
+    }
+
+    private void ensureNotTransfer(TransactionType type) {
+        if (type == TransactionType.TRANSFER) {
+            throw new BusinessException("Transferencias entre contas nao devem ser vinculadas a contas ou receitas planejadas.");
         }
     }
 

@@ -292,10 +292,7 @@ public class FinancialPeriodService {
         item.setRecurrenceEndDate(validateRecurrenceEndDate(item.isRecurring(), request.recurrenceEndDate(), item.getDueDate()));
         item.setStatus(request.status() == null ? MonthlyPlanItemStatus.PENDING : request.status());
         item.setNotes(normalizeNullable(request.notes()));
-        if (item.getStatus() == MonthlyPlanItemStatus.PAID) {
-            item.setActualAmount(item.getExpectedAmount());
-            item.setPaidOn(item.getDueDate());
-        }
+        rejectDirectSettlementStatus(item.getStatus(), null);
 
         MonthlyPlanItem saved = planItemRepository.save(item);
         initializeRecurringMetadata(saved);
@@ -340,15 +337,15 @@ public class FinancialPeriodService {
             }
         }
         if (request.actualAmount() != null) {
-            item.setActualAmount(normalizeZeroOrPositive(request.actualAmount()));
+            throw new BusinessException("O valor realizado nao pode ser editado diretamente. Registre uma baixa, recebimento ou conciliacao para alterar este valor.");
         }
         if (request.dueDate() != null) {
             validateDueDate(item.getFinancialPeriod(), request.dueDate());
             item.setDueDate(request.dueDate());
             item.setRecurrenceEndDate(validateRecurrenceEndDate(item.isRecurring(), item.getRecurrenceEndDate(), item.getDueDate()));
         }
-        if (request.paidOn() != null) {
-            item.setPaidOn(request.paidOn());
+        if (request.paidOn() != null && !Objects.equals(request.paidOn(), item.getPaidOn())) {
+            throw new BusinessException("A data de pagamento ou recebimento deve vir da baixa, recebimento ou conciliacao vinculada.");
         }
         if (request.nature() != null) {
             item.setNature(request.nature());
@@ -377,13 +374,8 @@ public class FinancialPeriodService {
             item.setRecurrenceEndDate(validateRecurrenceEndDate(item.isRecurring(), request.recurrenceEndDate(), item.getDueDate()));
         }
         if (request.status() != null) {
+            rejectDirectSettlementStatus(request.status(), item.getStatus());
             item.setStatus(request.status());
-            if (request.status() == MonthlyPlanItemStatus.PAID && item.getActualAmount().signum() == 0) {
-                item.setActualAmount(item.getExpectedAmount());
-            }
-            if (request.status() == MonthlyPlanItemStatus.PAID && item.getPaidOn() == null) {
-                item.setPaidOn(LocalDate.now());
-            }
         }
         if (request.notes() != null) {
             item.setNotes(normalizeNullable(request.notes()));
@@ -1040,6 +1032,13 @@ public class FinancialPeriodService {
             return;
         }
         item.setStatus(MonthlyPlanItemStatus.PARTIALLY_PAID);
+    }
+
+    private void rejectDirectSettlementStatus(MonthlyPlanItemStatus requestedStatus, MonthlyPlanItemStatus currentStatus) {
+        if ((requestedStatus == MonthlyPlanItemStatus.PAID || requestedStatus == MonthlyPlanItemStatus.PARTIALLY_PAID)
+                && requestedStatus != currentStatus) {
+            throw new BusinessException("Use a baixa, recebimento ou conciliacao para marcar um item como pago ou parcialmente pago.");
+        }
     }
 
     private void ensurePlanningEditable(FinancialPeriod period) {

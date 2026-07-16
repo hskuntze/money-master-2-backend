@@ -217,6 +217,7 @@ public class PaymentService {
         }
         FinancialTransactionCreateRequest transactionRequest = new FinancialTransactionCreateRequest(
                 account == null ? null : account.getId(),
+                null,
                 category == null ? null : category.getId(),
                 item.getFinancialPeriod().getId(),
                 item.getId(),

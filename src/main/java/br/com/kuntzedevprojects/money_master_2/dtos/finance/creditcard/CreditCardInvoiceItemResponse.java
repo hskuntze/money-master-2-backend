@@ -37,7 +37,7 @@ public record CreditCardInvoiceItemResponse(
                 item.getSourceType(),
                 item.getSourceId(),
                 item.getInstallmentNumber(),
-                item.getTransactionId(),
+                item.getTransaction() == null ? null : item.getTransaction().getId(),
                 item.getNotes(),
                 item.getCreatedAt(),
                 item.getUpdatedAt()

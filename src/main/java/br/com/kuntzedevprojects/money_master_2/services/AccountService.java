@@ -151,10 +151,14 @@ public class AccountService {
     private AccountBalanceResponse balance(String ownerEmail, Account account) {
         BigDecimal incomeTotal = transactionRepository.sumAmount(ownerEmail, account.getId(), null, null, null, TransactionType.INCOME);
         BigDecimal expenseTotal = transactionRepository.sumAmount(ownerEmail, account.getId(), null, null, null, TransactionType.EXPENSE);
-        BigDecimal transferTotal = transactionRepository.sumAmount(ownerEmail, account.getId(), null, null, null, TransactionType.TRANSFER);
+        BigDecimal transferOutTotal = transactionRepository.sumOutgoingTransfers(ownerEmail, account.getId(), TransactionType.TRANSFER);
+        BigDecimal transferInTotal = transactionRepository.sumIncomingTransfers(ownerEmail, account.getId(), TransactionType.TRANSFER);
+        BigDecimal transferTotal = nullToZero(transferInTotal).add(nullToZero(transferOutTotal));
         BigDecimal currentBalance = account.getInitialBalance()
                 .add(nullToZero(incomeTotal))
-                .subtract(nullToZero(expenseTotal));
+                .subtract(nullToZero(expenseTotal))
+                .subtract(nullToZero(transferOutTotal))
+                .add(nullToZero(transferInTotal));
 
         return new AccountBalanceResponse(
                 account.getId(),

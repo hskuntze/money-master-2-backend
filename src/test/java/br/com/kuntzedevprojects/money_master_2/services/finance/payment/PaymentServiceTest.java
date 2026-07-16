@@ -31,6 +31,7 @@ import br.com.kuntzedevprojects.money_master_2.services.CategoryService;
 import br.com.kuntzedevprojects.money_master_2.services.CurrentUserService;
 import br.com.kuntzedevprojects.money_master_2.services.FinancialPeriodService;
 import br.com.kuntzedevprojects.money_master_2.services.FinancialTransactionService;
+import br.com.kuntzedevprojects.money_master_2.services.SavingsJarService;
 
 class PaymentServiceTest {
 
@@ -41,6 +42,7 @@ class PaymentServiceTest {
     private final CurrentUserService currentUserService = mock(CurrentUserService.class);
     private final AccountService accountService = mock(AccountService.class);
     private final CategoryService categoryService = mock(CategoryService.class);
+    private final SavingsJarService savingsJarService = mock(SavingsJarService.class);
     private final PaymentService service = new PaymentService(
             paymentRepository,
             transactionRepository,
@@ -48,7 +50,8 @@ class PaymentServiceTest {
             transactionService,
             currentUserService,
             accountService,
-            categoryService
+            categoryService,
+            savingsJarService
     );
 
     @Test

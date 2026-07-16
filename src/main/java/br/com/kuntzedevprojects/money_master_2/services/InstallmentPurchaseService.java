@@ -29,7 +29,6 @@ import br.com.kuntzedevprojects.money_master_2.entities.InstallmentPurchaseEntry
 import br.com.kuntzedevprojects.money_master_2.entities.MonthlyPlanItem;
 import br.com.kuntzedevprojects.money_master_2.entities.User;
 import br.com.kuntzedevprojects.money_master_2.enums.CreditCardInvoiceItemSourceType;
-import br.com.kuntzedevprojects.money_master_2.enums.FinancialPeriodStatus;
 import br.com.kuntzedevprojects.money_master_2.enums.InstallmentEntryStatus;
 import br.com.kuntzedevprojects.money_master_2.enums.InstallmentPaymentSource;
 import br.com.kuntzedevprojects.money_master_2.enums.InstallmentPaymentMode;
@@ -89,7 +88,6 @@ public class InstallmentPurchaseService {
 
     @Transactional
     public List<InstallmentPurchaseResponse> list(String ownerEmail) {
-        applyAutomaticPaymentsForClosedPeriods(ownerEmail);
         return purchaseRepository.findByOwnerEmailWithEntries(ownerEmail)
                 .stream()
                 .map(InstallmentPurchaseResponse::from)
@@ -98,7 +96,6 @@ public class InstallmentPurchaseService {
 
     @Transactional
     public InstallmentPurchaseResponse get(String ownerEmail, Long id) {
-        applyAutomaticPaymentsForClosedPeriods(ownerEmail);
         return InstallmentPurchaseResponse.from(findOwnedPurchase(ownerEmail, id));
     }
 
@@ -117,6 +114,7 @@ public class InstallmentPurchaseService {
         int count = normalizeCount(request.installmentCount());
         BigDecimal installmentAmount = resolveInstallmentAmount(request.totalAmount(), request.installmentAmount(), count);
         BigDecimal totalAmount = resolveTotalAmount(request.totalAmount(), installmentAmount, count);
+        List<BigDecimal> installmentAmounts = resolveInstallmentAmounts(request.totalAmount(), installmentAmount, totalAmount, count);
         LocalDate firstDueDate = request.firstDueDate();
         LocalDate purchaseDate = request.purchaseDate() == null ? LocalDate.now() : request.purchaseDate();
         if (firstDueDate == null) {
@@ -149,6 +147,7 @@ public class InstallmentPurchaseService {
 
         for (int index = 0; index < count; index++) {
             LocalDate dueDate = firstDueDate.plusMonths(index);
+            BigDecimal currentInstallmentAmount = installmentAmounts.get(index);
             FinancialPeriod period = financialPeriodService.findOrCreateForDate(ownerEmail, dueDate);
             InstallmentPurchaseEntry entry = new InstallmentPurchaseEntry();
             entry.setOwner(owner);
@@ -156,12 +155,12 @@ public class InstallmentPurchaseService {
             entry.setFinancialPeriod(period);
             entry.setInstallmentNumber(index + 1);
             entry.setDueDate(dueDate);
-            entry.setAmount(installmentAmount);
+            entry.setAmount(currentInstallmentAmount);
             entry.setPaymentSource(InstallmentPaymentSource.NONE);
             entry.setNotes("Parcela " + (index + 1) + " de " + count + " da compra parcelada.");
             if (paymentMode == InstallmentPaymentMode.CREDIT_CARD) {
                 CreditCardInvoice invoice = creditCardInvoiceService.findOrCreateForInstallment(ownerEmail, creditCard.getId(), dueDate);
-                CreditCardInvoiceItem invoiceItem = createInvoiceItem(owner, saved, invoice, purchaseDate, dueDate, index + 1, installmentAmount, category);
+                CreditCardInvoiceItem invoiceItem = createInvoiceItem(owner, saved, invoice, purchaseDate, dueDate, index + 1, currentInstallmentAmount, category);
                 entry.setFinancialPeriod(invoice.getCycle());
                 entry.setInvoiceItem(invoiceItem);
                 entry.setStatus(InstallmentEntryStatus.IN_INVOICE);
@@ -170,10 +169,9 @@ public class InstallmentPurchaseService {
                 }
                 creditCardInvoiceService.syncInvoiceTotals(ownerEmail, invoice);
             } else {
-                MonthlyPlanItem item = createMonthlyPlanItem(owner, saved, period, dueDate, index + 1, installmentAmount, category, account);
+                MonthlyPlanItem item = createMonthlyPlanItem(owner, saved, period, dueDate, index + 1, currentInstallmentAmount, category, account);
                 entry.setMonthlyPlanItem(item);
                 entry.setStatus(InstallmentEntryStatus.POSTED);
-                applyAutomaticPaymentIfEligible(entry, LocalDate.now());
             }
             saved.addEntry(entry);
         }
@@ -331,39 +329,6 @@ public class InstallmentPurchaseService {
         });
     }
 
-    private void applyAutomaticPaymentsForClosedPeriods(String ownerEmail) {
-        LocalDate today = LocalDate.now();
-        List<InstallmentPurchaseEntry> entries = entryRepository.findActiveEntriesByOwnerEmail(ownerEmail);
-        entries.forEach(entry -> applyAutomaticPaymentIfEligible(entry, today));
-        entries.stream()
-                .map(InstallmentPurchaseEntry::getPurchase)
-                .filter(Objects::nonNull)
-                .distinct()
-                .forEach(this::refreshPurchaseStatus);
-    }
-
-    private void applyAutomaticPaymentIfEligible(InstallmentPurchaseEntry entry, LocalDate today) {
-        if (entry == null || entry.getStatus() == InstallmentEntryStatus.CANCELED || entry.getStatus() == InstallmentEntryStatus.PAID) {
-            return;
-        }
-        if (entry.getPaymentSource() == InstallmentPaymentSource.MANUAL || entry.getPaymentSource() == InstallmentPaymentSource.CHAT) {
-            return;
-        }
-        FinancialPeriod period = entry.getFinancialPeriod();
-        if (period == null || !isPeriodEffectivelyClosed(period, today)) {
-            return;
-        }
-        if (isEntryLinkedToInvoice(entry)) {
-            return;
-        }
-        markEntryPaid(entry, period.getEndDate(), InstallmentPaymentSource.AUTOMATIC, null);
-    }
-
-    private boolean isPeriodEffectivelyClosed(FinancialPeriod period, LocalDate today) {
-        return period.getStatus() == FinancialPeriodStatus.CLOSED
-                || (period.getEndDate() != null && period.getEndDate().isBefore(today));
-    }
-
     private void markEntryPaid(InstallmentPurchaseEntry entry, LocalDate paidOn, InstallmentPaymentSource source, User actor) {
         if (isEntryLinkedToInvoice(entry)) {
             return;
@@ -497,7 +462,6 @@ public class InstallmentPurchaseService {
     }
 
     private InstallmentPurchase resolvePurchaseForAi(String ownerEmail, Long purchaseId, String description) {
-        applyAutomaticPaymentsForClosedPeriods(ownerEmail);
         if (purchaseId != null) {
             return findOwnedPurchase(ownerEmail, purchaseId);
         }
@@ -594,6 +558,28 @@ public class InstallmentPurchaseService {
             return totalAmount.setScale(2, RoundingMode.HALF_UP);
         }
         return installmentAmount.multiply(BigDecimal.valueOf(count)).setScale(2, RoundingMode.HALF_UP);
+    }
+
+    private List<BigDecimal> resolveInstallmentAmounts(BigDecimal requestedTotalAmount, BigDecimal installmentAmount, BigDecimal totalAmount, int count) {
+        if (requestedTotalAmount == null || requestedTotalAmount.signum() <= 0) {
+            return java.util.stream.IntStream.range(0, count)
+                    .mapToObj(index -> installmentAmount.setScale(2, RoundingMode.HALF_UP))
+                    .toList();
+        }
+        BigDecimal baseAmount = installmentAmount.setScale(2, RoundingMode.HALF_UP);
+        BigDecimal accumulated = BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
+        java.util.ArrayList<BigDecimal> amounts = new java.util.ArrayList<>(count);
+        for (int index = 0; index < count; index++) {
+            BigDecimal amount = index == count - 1
+                    ? totalAmount.subtract(accumulated).setScale(2, RoundingMode.HALF_UP)
+                    : baseAmount;
+            if (amount.signum() <= 0) {
+                throw new BusinessException("O valor total e a quantidade de parcelas geram parcelas zeradas. Ajuste os valores da compra.");
+            }
+            amounts.add(amount);
+            accumulated = accumulated.add(amount).setScale(2, RoundingMode.HALF_UP);
+        }
+        return amounts;
     }
 
     private LocalDate parseDateOrToday(String value) {

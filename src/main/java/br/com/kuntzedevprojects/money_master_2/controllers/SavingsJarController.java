@@ -81,8 +81,11 @@ public class SavingsJarController {
     @DeleteMapping("/{id}")
     @PreAuthorize("hasAuthority('FINANCE_MANAGE')")
     public ResponseEntity<MessageResponse> delete(@PathVariable Long id, Principal principal) {
-        savingsJarService.delete(principal.getName(), id);
-        return ResponseEntity.ok(new MessageResponse("Cofrinho excluído com sucesso."));
+        boolean deleted = savingsJarService.delete(principal.getName(), id);
+        String message = deleted
+                ? "Cofrinho excluido com sucesso."
+                : "Cofrinho arquivado. O historico de movimentacoes foi preservado.";
+        return ResponseEntity.ok(new MessageResponse(message));
     }
 
     @GetMapping("/{id}/movements")

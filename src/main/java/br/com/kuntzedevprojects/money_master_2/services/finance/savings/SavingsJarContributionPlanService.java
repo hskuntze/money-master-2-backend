@@ -15,6 +15,7 @@ import br.com.kuntzedevprojects.money_master_2.enums.MonthlyPlanItemAggregationT
 import br.com.kuntzedevprojects.money_master_2.enums.MonthlyPlanItemNature;
 import br.com.kuntzedevprojects.money_master_2.enums.MonthlyPlanItemStatus;
 import br.com.kuntzedevprojects.money_master_2.enums.TransactionType;
+import br.com.kuntzedevprojects.money_master_2.exceptions.BusinessException;
 import br.com.kuntzedevprojects.money_master_2.services.FinancialPeriodService;
 import br.com.kuntzedevprojects.money_master_2.services.SavingsJarService;
 
@@ -45,6 +46,9 @@ public class SavingsJarContributionPlanService {
     @Transactional
     public SavingsJarContributionPlanResponse create(String ownerEmail, Long cycleId, Long jarId, SavingsJarContributionPlanRequest request) {
         SavingsJar jar = savingsJarService.findOwnedJar(ownerEmail, jarId);
+        if (!jar.isActive()) {
+            throw new BusinessException("Este cofrinho esta arquivado. Reative-o antes de planejar novos aportes.");
+        }
         MonthlyPlanItemCreateRequest planRequest = new MonthlyPlanItemCreateRequest(
                 jar.getLinkedAccount() == null ? null : jar.getLinkedAccount().getId(),
                 null,
