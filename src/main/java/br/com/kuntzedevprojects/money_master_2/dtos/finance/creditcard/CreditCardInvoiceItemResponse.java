@@ -5,6 +5,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 
 import br.com.kuntzedevprojects.money_master_2.entities.CreditCardInvoiceItem;
+import br.com.kuntzedevprojects.money_master_2.enums.CreditCardInvoiceItemConfirmationStatus;
 import br.com.kuntzedevprojects.money_master_2.enums.CreditCardInvoiceItemSourceType;
 
 public record CreditCardInvoiceItemResponse(
@@ -17,6 +18,8 @@ public record CreditCardInvoiceItemResponse(
         LocalDate purchaseDate,
         LocalDate competenceDate,
         CreditCardInvoiceItemSourceType sourceType,
+        CreditCardInvoiceItemConfirmationStatus confirmationStatus,
+        boolean confirmed,
         Long sourceId,
         Integer installmentNumber,
         Long transactionId,
@@ -35,6 +38,8 @@ public record CreditCardInvoiceItemResponse(
                 item.getPurchaseDate(),
                 item.getCompetenceDate(),
                 item.getSourceType(),
+                item.getConfirmationStatus(),
+                item.isConfirmed(),
                 item.getSourceId(),
                 item.getInstallmentNumber(),
                 item.getTransaction() == null ? null : item.getTransaction().getId(),

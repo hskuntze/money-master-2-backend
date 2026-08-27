@@ -12,6 +12,8 @@ public record AccountBalanceResponse(
         BigDecimal incomeTotal,
         BigDecimal expenseTotal,
         BigDecimal transferTotal,
-        BigDecimal currentBalance
+        BigDecimal currentBalance,
+        BigDecimal reservedInSavingsJars,
+        BigDecimal availableBalance
 ) {
 }

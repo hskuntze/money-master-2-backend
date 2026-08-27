@@ -4,6 +4,7 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
 
+import br.com.kuntzedevprojects.money_master_2.enums.CreditCardInvoiceItemConfirmationStatus;
 import br.com.kuntzedevprojects.money_master_2.enums.CreditCardInvoiceItemSourceType;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -58,6 +59,9 @@ public class CreditCardInvoiceItem {
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 40)
     private CreditCardInvoiceItemSourceType sourceType = CreditCardInvoiceItemSourceType.MANUAL;
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 30)
+    private CreditCardInvoiceItemConfirmationStatus confirmationStatus = CreditCardInvoiceItemConfirmationStatus.CONFIRMED;
     private Long sourceId;
     private Integer installmentNumber;
     @OneToOne(fetch = FetchType.LAZY)
@@ -92,6 +96,9 @@ public class CreditCardInvoiceItem {
     public void setCompetenceDate(LocalDate competenceDate) { this.competenceDate = competenceDate; }
     public CreditCardInvoiceItemSourceType getSourceType() { return sourceType; }
     public void setSourceType(CreditCardInvoiceItemSourceType sourceType) { this.sourceType = sourceType; }
+    public CreditCardInvoiceItemConfirmationStatus getConfirmationStatus() { return confirmationStatus; }
+    public void setConfirmationStatus(CreditCardInvoiceItemConfirmationStatus confirmationStatus) { this.confirmationStatus = confirmationStatus; }
+    public boolean isConfirmed() { return confirmationStatus == CreditCardInvoiceItemConfirmationStatus.CONFIRMED; }
     public Long getSourceId() { return sourceId; }
     public void setSourceId(Long sourceId) { this.sourceId = sourceId; }
     public Integer getInstallmentNumber() { return installmentNumber; }

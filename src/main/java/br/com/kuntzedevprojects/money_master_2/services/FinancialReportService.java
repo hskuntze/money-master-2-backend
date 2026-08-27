@@ -18,6 +18,7 @@ import br.com.kuntzedevprojects.money_master_2.dtos.finance.DailyCashFlowRespons
 import br.com.kuntzedevprojects.money_master_2.dtos.finance.FinancialSummaryResponse;
 import br.com.kuntzedevprojects.money_master_2.dtos.finance.dashboard.MonthlyDashboardResponse;
 import br.com.kuntzedevprojects.money_master_2.dtos.finance.report.MonthlySemanticReportResponse;
+import br.com.kuntzedevprojects.money_master_2.dtos.investment.InvestmentProductResponse;
 import br.com.kuntzedevprojects.money_master_2.dtos.savingsjar.SavingsJarSummaryResponse;
 import br.com.kuntzedevprojects.money_master_2.entities.Category;
 import br.com.kuntzedevprojects.money_master_2.entities.FinancialTransaction;
@@ -25,6 +26,7 @@ import br.com.kuntzedevprojects.money_master_2.enums.TransactionType;
 import br.com.kuntzedevprojects.money_master_2.exceptions.BusinessException;
 import br.com.kuntzedevprojects.money_master_2.repositories.FinancialTransactionRepository;
 import br.com.kuntzedevprojects.money_master_2.services.finance.dashboard.MonthlyDashboardService;
+import br.com.kuntzedevprojects.money_master_2.services.finance.investment.InvestmentProductService;
 
 @Service
 public class FinancialReportService {
@@ -33,17 +35,20 @@ public class FinancialReportService {
     private final AccountService accountService;
     private final MonthlyDashboardService monthlyDashboardService;
     private final SavingsJarService savingsJarService;
+    private final InvestmentProductService investmentProductService;
 
     public FinancialReportService(
             FinancialTransactionRepository transactionRepository,
             AccountService accountService,
             MonthlyDashboardService monthlyDashboardService,
-            SavingsJarService savingsJarService
+            SavingsJarService savingsJarService,
+            InvestmentProductService investmentProductService
     ) {
         this.transactionRepository = transactionRepository;
         this.accountService = accountService;
         this.monthlyDashboardService = monthlyDashboardService;
         this.savingsJarService = savingsJarService;
+        this.investmentProductService = investmentProductService;
     }
 
     @Transactional(readOnly = true)
@@ -119,8 +124,16 @@ public class FinancialReportService {
 
     @Transactional(readOnly = true)
     public MonthlySemanticReportResponse monthlySemantic(String ownerEmail, Long cycleId) {
+        return monthlySemantic(ownerEmail, cycleId, true);
+    }
+
+    @Transactional(readOnly = true)
+    public MonthlySemanticReportResponse monthlySemantic(String ownerEmail, Long cycleId, boolean includeInvestmentDetails) {
         MonthlyDashboardResponse dashboard = monthlyDashboardService.get(ownerEmail, cycleId);
         SavingsJarSummaryResponse savings = savingsJarService.summary(ownerEmail);
+        List<InvestmentProductResponse> investments = includeInvestmentDetails
+                ? investmentProductService.list(ownerEmail)
+                : List.of();
         LocalDate from = dashboard.cycle().startDate();
         LocalDate to = dashboard.cycle().endDate();
 
@@ -131,6 +144,7 @@ public class FinancialReportService {
                         dashboard.plannedPayablesTotal(),
                         dashboard.creditCardInvoicesTotal(),
                         dashboard.savingsPlannedTotal(),
+                        dashboard.investmentPlannedTotal(),
                         dashboard.plannedAvailableAmount()
                 ),
                 new MonthlySemanticReportResponse.RealizedSection(
@@ -138,6 +152,7 @@ public class FinancialReportService {
                         dashboard.paidPayablesTotal(),
                         dashboard.creditCardInvoicesPaidTotal(),
                         dashboard.savingsActualTotal(),
+                        dashboard.investmentActualTotal(),
                         dashboard.unplannedIncomeTotal(),
                         dashboard.unplannedExpenseTotal(),
                         dashboard.realizedAvailableAmount()
@@ -160,12 +175,40 @@ public class FinancialReportService {
                         savings.totalYield(),
                         savings.averageProgressPercentage()
                 ),
+                investmentSection(dashboard, investments, includeInvestmentDetails),
                 dashboard.cashBalanceCurrent(),
                 dashboard.projectedAvailableAmount(),
                 dailyCashFlow(ownerEmail, from, to),
                 byCategory(ownerEmail, from, to, TransactionType.EXPENSE),
                 byCategory(ownerEmail, from, to, TransactionType.INCOME),
                 dashboard.alerts()
+        );
+    }
+
+    private MonthlySemanticReportResponse.InvestmentSection investmentSection(
+            MonthlyDashboardResponse dashboard,
+            List<InvestmentProductResponse> investments,
+            boolean includeInvestmentDetails
+    ) {
+        if (!includeInvestmentDetails) {
+            return new MonthlySemanticReportResponse.InvestmentSection(
+                    BigDecimal.ZERO,
+                    BigDecimal.ZERO,
+                    BigDecimal.ZERO,
+                    BigDecimal.ZERO,
+                    BigDecimal.ZERO,
+                    BigDecimal.ZERO,
+                    0
+            );
+        }
+        return new MonthlySemanticReportResponse.InvestmentSection(
+                investments.stream().map(InvestmentProductResponse::currentAmount).reduce(BigDecimal.ZERO, BigDecimal::add),
+                investments.stream().map(InvestmentProductResponse::totalContributed).reduce(BigDecimal.ZERO, BigDecimal::add),
+                investments.stream().map(InvestmentProductResponse::totalWithdrawn).reduce(BigDecimal.ZERO, BigDecimal::add),
+                investments.stream().map(InvestmentProductResponse::totalYield).reduce(BigDecimal.ZERO, BigDecimal::add),
+                dashboard.investmentPlannedTotal(),
+                dashboard.investmentActualTotal(),
+                investments.stream().filter(InvestmentProductResponse::active).count()
         );
     }
 

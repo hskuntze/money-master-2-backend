@@ -155,15 +155,15 @@ public class FinanceChatService {
                 - Idioma principal: português do Brasil.
                 - Data atual: %s.
                 - conversationId desta conversa: %s.
-                - Fase 11 ativa: prefira os comandos estruturados novos quando forem especificos: CREATE_MONTHLY_PAYABLE, CREATE_MONTHLY_INCOME_PLAN, REGISTER_PAYMENT, REGISTER_INCOME_RECEIPT, PAY_CREDIT_CARD_INVOICE, ANTICIPATE_INSTALLMENTS e CREATE_SAVINGS_JAR_CONTRIBUTION_PLAN.
+                - Fase 11 ativa: prefira os comandos estruturados novos quando forem especificos: CREATE_MONTHLY_PAYABLE, CREATE_MONTHLY_INCOME_PLAN, REGISTER_PAYMENT, REGISTER_INCOME_RECEIPT, PAY_CREDIT_CARD_INVOICE, ANTICIPATE_INSTALLMENTS, CREATE_SAVINGS_JAR_CONTRIBUTION_PLAN e comandos de investimento.
                 - Antes de executar escritas financeiras sensiveis, gere previewFinanceCommands, mostre o impacto ao usuario e espere confirmacao. O backend so executa se executeFinanceCommands receber o confirmationToken retornado na previa, com o mesmo lote de comandos.
-                - Use getMonthlySemanticReport para analises do ciclo, dashboard, pendencias, faturas, parcelas, cofrinhos e impacto financeiro.
+                - Use getMonthlySemanticReport para analises do ciclo, dashboard, pendencias, faturas, parcelas, cofrinhos, investimentos e impacto financeiro.
                 - Formato obrigatório de datas para ferramentas: yyyy-MM-dd.
                 - O usuário autenticado já é definido pelo backend. Nunca peça, invente ou aceite userId/e-mail como parâmetro.
                 - A conversa tem memória persistida no backend. Use o histórico abaixo para entender respostas curtas como "sim", "esses mesmos", "pode atualizar" ou "confirma".
                 - Perfil financeiro do usuário: %s
                 - Referências financeiras cadastradas/ativas: %s
-                - Privacidade IA: perfil compartilhado=%s; resumo mensal compartilhado=%s; transacoes recentes compartilhadas=%s; cofrinhos/metas compartilhados=%s; escritas pela IA=%s; mascarar valores sensiveis=%s.
+                - Privacidade IA: perfil compartilhado=%s; resumo mensal compartilhado=%s; transacoes recentes compartilhadas=%s; cofrinhos/metas compartilhados=%s; investimentos/produtos financeiros compartilhados=%s; escritas pela IA=%s; mascarar valores sensiveis=%s.
 
                 Arquitetura de tools:
                 - Regra de seguranca: toda escrita financeira sensivel deve passar por previewFinanceCommands; executeFinanceCommands precisa receber o confirmationToken retornado pela previa e o mesmo lote de comandos.
@@ -207,6 +207,12 @@ public class FinanceChatService {
                 - LINK_MONTHLY_PLAN_ITEM_TO_INVOICE: vincular um item mensal como item interno de uma fatura manual de cartão. Use invoiceItemId para a fatura, monthlyPlanItemId para o item e invoiceContributionMode com COMPOSITION_ONLY ou ADDS_TO_INVOICE_TOTAL.
                 - LINK_TRANSACTION_TO_MONTHLY_PLAN_ITEM: associar uma transação já registrada a uma conta/renda planejada, sem criar lançamento novo.
                 - RECONCILE_MONTHLY_PLAN_WITH_TRANSACTIONS: reconciliar lote de transações do ciclo com contas/rendas planejadas. Use prévia antes de executar.
+                - CREATE_INVESTMENT_PRODUCT: criar produto financeiro/investimento simples, com nome, tipo, instituicao, conta vinculada, saldo inicial, rendimento atual e liquidez quando informados.
+                - CONTRIBUTE_INVESTMENT_PRODUCT: registrar aporte efetivo em produto financeiro. Isso altera o saldo do produto; para intenção futura, use CREATE_INVESTMENT_CONTRIBUTION_PLAN.
+                - WITHDRAW_INVESTMENT_PRODUCT: registrar resgate/retirada efetiva de produto financeiro.
+                - REGISTER_INVESTMENT_YIELD: registrar rendimento informado em produto financeiro.
+                - RECONCILE_INVESTMENT_BALANCE: ajustar saldo atual real do produto financeiro informado pelo usuário, preservando histórico por movimentação de ajuste.
+                - CREATE_INVESTMENT_CONTRIBUTION_PLAN: criar aporte planejado de investimento no ciclo mensal, sem registrar aporte efetivo.
 
                 Regras para lançamentos:
                 - Quando o usuário disser que gastou, pagou, comprou ou teve saída de dinheiro, use transactionType=EXPENSE.
@@ -251,6 +257,12 @@ public class FinanceChatService {
                 - Recomendações devem ser educacionais, contextualizadas e sem promessa de rentabilidade.
                 - Se faltarem dados relevantes do perfil, explique a limitação e peça os dados necessários.
                 - Para investimentos, considere objetivos, horizonte, tolerância a risco, capacidade de poupança e conhecimento informado.
+                - Se investimentos/produtos financeiros compartilhados=false, nao consulte nem altere investimentos pela IA; explique que esta permissao precisa ser ativada em Privacidade IA.
+                - Se o usuário perguntar quais investimentos/produtos financeiros existem ou mencionar nomes livres, use listInvestmentProducts antes de montar comandos.
+                - Aporte efetivo em investimento altera o saldo do produto financeiro; aporte planejado altera apenas o planejamento mensal até que seja baixado/realizado.
+                - Para produtos como capitalização, preserve o tipo informado pelo usuário em investmentTypeName; não force classificação rígida.
+                - Se o usuário disser "o investimento X agora está com R$ Y", use RECONCILE_INVESTMENT_BALANCE em prévia.
+                - Se houver mais de um produto financeiro parecido, peça esclarecimento ou use o id retornado por listInvestmentProducts.
 
                 Regras para categorias:
                 - Se o usuário usar a palavra "tipo" com nomes livres como "outro", "cartão de crédito", "mercado" ou "alimentação", interprete como categoria, não como TransactionType.
@@ -293,6 +305,7 @@ public class FinanceChatService {
                 privacySettings.isShareMonthlySummary(),
                 privacySettings.isShareRecentTransactions(),
                 privacySettings.isShareSavingsGoals(),
+                privacySettings.isShareInvestmentProducts(),
                 privacySettings.isAllowWriteOperations(),
                 privacySettings.isMaskSensitiveValues(),
                 renderHistory(previousMessages)

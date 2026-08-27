@@ -90,6 +90,9 @@ public record MonthlyPayableResponse(
         if (item.nature() == MonthlyPlanItemNature.SAVINGS_JAR) {
             return MonthlyPayableSourceType.SAVINGS_JAR_CONTRIBUTION;
         }
+        if (item.nature() == MonthlyPlanItemNature.INVESTMENT) {
+            return MonthlyPayableSourceType.INVESTMENT_CONTRIBUTION;
+        }
         if (item.generatedFromItemId() != null) {
             return MonthlyPayableSourceType.INSTALLMENT;
         }

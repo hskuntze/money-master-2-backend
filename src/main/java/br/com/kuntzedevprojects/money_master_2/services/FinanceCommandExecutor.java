@@ -1,5 +1,6 @@
 package br.com.kuntzedevprojects.money_master_2.services;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.ArrayList;
@@ -33,6 +34,12 @@ import br.com.kuntzedevprojects.money_master_2.dtos.finance.payment.PaymentReque
 import br.com.kuntzedevprojects.money_master_2.dtos.finance.payment.PaymentResponse;
 import br.com.kuntzedevprojects.money_master_2.dtos.savingsjar.SavingsJarContributionPlanRequest;
 import br.com.kuntzedevprojects.money_master_2.dtos.savingsjar.SavingsJarContributionPlanResponse;
+import br.com.kuntzedevprojects.money_master_2.dtos.investment.InvestmentContributionPlanRequest;
+import br.com.kuntzedevprojects.money_master_2.dtos.investment.InvestmentContributionPlanResponse;
+import br.com.kuntzedevprojects.money_master_2.dtos.investment.InvestmentMovementRequest;
+import br.com.kuntzedevprojects.money_master_2.dtos.investment.InvestmentMovementResponse;
+import br.com.kuntzedevprojects.money_master_2.dtos.investment.InvestmentProductCreateRequest;
+import br.com.kuntzedevprojects.money_master_2.dtos.investment.InvestmentProductResponse;
 import br.com.kuntzedevprojects.money_master_2.dtos.installments.InstallmentPurchaseResponse;
 import br.com.kuntzedevprojects.money_master_2.dtos.installments.InstallmentPaymentResultResponse;
 import br.com.kuntzedevprojects.money_master_2.dtos.installments.InstallmentAnticipationRequest;
@@ -45,17 +52,21 @@ import br.com.kuntzedevprojects.money_master_2.entities.AiChatConversation;
 import br.com.kuntzedevprojects.money_master_2.entities.AiCommandAudit;
 import br.com.kuntzedevprojects.money_master_2.entities.AiPrivacySettings;
 import br.com.kuntzedevprojects.money_master_2.entities.FinancialTransaction;
+import br.com.kuntzedevprojects.money_master_2.entities.InvestmentProduct;
 import br.com.kuntzedevprojects.money_master_2.entities.User;
 import br.com.kuntzedevprojects.money_master_2.enums.AiCommandStatus;
 import br.com.kuntzedevprojects.money_master_2.enums.FinanceCommandType;
 import br.com.kuntzedevprojects.money_master_2.enums.MonthlyPlanItemInvoiceContributionMode;
 import br.com.kuntzedevprojects.money_master_2.enums.MonthlyPlanItemNature;
+import br.com.kuntzedevprojects.money_master_2.enums.TransactionSource;
 import br.com.kuntzedevprojects.money_master_2.enums.TransactionType;
 import br.com.kuntzedevprojects.money_master_2.exceptions.BusinessException;
 import br.com.kuntzedevprojects.money_master_2.repositories.AiCommandAuditRepository;
 import br.com.kuntzedevprojects.money_master_2.repositories.FinancialTransactionRepository;
 import br.com.kuntzedevprojects.money_master_2.services.finance.creditcard.CreditCardInvoicePaymentService;
 import br.com.kuntzedevprojects.money_master_2.services.finance.installment.InstallmentAnticipationService;
+import br.com.kuntzedevprojects.money_master_2.services.finance.investment.InvestmentContributionPlanService;
+import br.com.kuntzedevprojects.money_master_2.services.finance.investment.InvestmentProductService;
 import br.com.kuntzedevprojects.money_master_2.services.finance.payment.PaymentService;
 import br.com.kuntzedevprojects.money_master_2.services.finance.savings.SavingsJarContributionPlanService;
 
@@ -77,6 +88,8 @@ public class FinanceCommandExecutor {
     private final CreditCardInvoicePaymentService creditCardInvoicePaymentService;
     private final InstallmentAnticipationService installmentAnticipationService;
     private final SavingsJarContributionPlanService savingsJarContributionPlanService;
+    private final InvestmentProductService investmentProductService;
+    private final InvestmentContributionPlanService investmentContributionPlanService;
     private final FinancialTransactionRepository transactionRepository;
     private final AiCommandAuditRepository auditRepository;
     private final AiCommandConfirmationService confirmationService;
@@ -97,6 +110,8 @@ public class FinanceCommandExecutor {
             CreditCardInvoicePaymentService creditCardInvoicePaymentService,
             InstallmentAnticipationService installmentAnticipationService,
             SavingsJarContributionPlanService savingsJarContributionPlanService,
+            InvestmentProductService investmentProductService,
+            InvestmentContributionPlanService investmentContributionPlanService,
             FinancialTransactionRepository transactionRepository,
             AiCommandAuditRepository auditRepository,
             AiCommandConfirmationService confirmationService,
@@ -116,6 +131,8 @@ public class FinanceCommandExecutor {
         this.creditCardInvoicePaymentService = creditCardInvoicePaymentService;
         this.installmentAnticipationService = installmentAnticipationService;
         this.savingsJarContributionPlanService = savingsJarContributionPlanService;
+        this.investmentProductService = investmentProductService;
+        this.investmentContributionPlanService = investmentContributionPlanService;
         this.transactionRepository = transactionRepository;
         this.auditRepository = auditRepository;
         this.confirmationService = confirmationService;
@@ -203,6 +220,7 @@ public class FinanceCommandExecutor {
             throw new BusinessException("Todo comando financeiro precisa ter um tipo.");
         }
         try {
+            requireInvestmentSharingForCommand(ownerEmail, command.type());
             FinanceCommandResult result = switch (command.type()) {
                 case REGISTER_TRANSACTION -> registerTransaction(ownerEmail, command, dryRun, null);
                 case INCOME, EXPENSE, TRANSFER -> registerTransaction(ownerEmail, command, dryRun, command.type().impliedTransactionType());
@@ -216,6 +234,12 @@ public class FinanceCommandExecutor {
                 case RECONCILE_SAVINGS_JAR_BALANCE -> reconcileSavingsJarBalance(ownerEmail, command, dryRun);
                 case CREATE_SAVINGS_JAR -> createSavingsJar(ownerEmail, command, dryRun);
                 case CREATE_SAVINGS_JAR_CONTRIBUTION_PLAN -> createSavingsJarContributionPlan(ownerEmail, command, dryRun);
+                case CREATE_INVESTMENT_PRODUCT -> createInvestmentProduct(ownerEmail, command, dryRun);
+                case CONTRIBUTE_INVESTMENT_PRODUCT -> contributeInvestmentProduct(ownerEmail, command, dryRun);
+                case WITHDRAW_INVESTMENT_PRODUCT -> withdrawInvestmentProduct(ownerEmail, command, dryRun);
+                case REGISTER_INVESTMENT_YIELD -> registerInvestmentYield(ownerEmail, command, dryRun);
+                case RECONCILE_INVESTMENT_BALANCE -> reconcileInvestmentBalance(ownerEmail, command, dryRun);
+                case CREATE_INVESTMENT_CONTRIBUTION_PLAN -> createInvestmentContributionPlan(ownerEmail, command, dryRun);
                 case CREATE_MONTHLY_PLAN_ITEM, CREATE_MONTHLY_INCOME_PLAN, CREATE_MONTHLY_PAYABLE -> createMonthlyPlanItem(ownerEmail, command, dryRun);
                 case PAY_MONTHLY_PLAN_ITEM -> payMonthlyPlanItem(ownerEmail, command, dryRun);
                 case REGISTER_PAYMENT -> registerPayment(ownerEmail, command, dryRun);
@@ -462,6 +486,149 @@ public class FinanceCommandExecutor {
                 )
         );
         return executed(command.type(), "Aporte planejado de cofrinho criado no ciclo mensal.", mapOf("savingsJarContributionPlan", response));
+    }
+
+    private FinanceCommandResult createInvestmentProduct(String ownerEmail, FinanceCommandItem command, boolean dryRun) {
+        String productName = required(firstNonBlank(command.investmentProductName(), command.description()), "Informe o nome do produto financeiro.");
+        String typeName = required(command.investmentTypeName(), "Informe o tipo do produto financeiro.");
+        LocalDate initialBalanceDate = parseDateOrNull(command.occurredOn());
+        if (dryRun) {
+            return previewed(command.type(), true, "Vou criar um produto financeiro.", mapOf(
+                    "nome", productName,
+                    "tipo", typeName,
+                    "instituicao", command.institutionName(),
+                    "contaVinculadaId", command.accountId(),
+                    "liquidez", command.liquidity(),
+                    "saldoInicial", command.currentAmount(),
+                    "rendimentoAtual", command.currentYieldAmount(),
+                    "dataSaldoInicial", initialBalanceDate
+            ));
+        }
+        InvestmentProductResponse response = investmentProductService.create(ownerEmail, new InvestmentProductCreateRequest(
+                productName,
+                typeName,
+                command.institutionName(),
+                command.accountId(),
+                command.liquidity(),
+                command.currentAmount(),
+                command.currentYieldAmount(),
+                initialBalanceDate,
+                true,
+                command.notes()
+        ));
+        return executed(command.type(), "Produto financeiro criado com sucesso.", mapOf("investmentProduct", response));
+    }
+
+    private FinanceCommandResult contributeInvestmentProduct(String ownerEmail, FinanceCommandItem command, boolean dryRun) {
+        InvestmentProduct product = resolveInvestmentProduct(ownerEmail, command);
+        LocalDate occurredOn = parseDateOrNull(firstNonBlank(command.paymentDate(), command.occurredOn()));
+        if (dryRun) {
+            return previewed(command.type(), false, "Vou registrar um aporte no produto financeiro.", mapOf(
+                    "produtoFinanceiroId", product.getId(),
+                    "produtoFinanceiro", product.getName(),
+                    "instituicao", product.getInstitutionName(),
+                    "valor", command.amount(),
+                    "data", occurredOn
+            ));
+        }
+        InvestmentMovementResponse response = investmentProductService.contribute(
+                ownerEmail,
+                product.getId(),
+                investmentMovementRequest(command, "Aporte no produto financeiro")
+        );
+        return executed(command.type(), "Aporte no produto financeiro registrado com sucesso.", mapOf("investmentMovement", response));
+    }
+
+    private FinanceCommandResult withdrawInvestmentProduct(String ownerEmail, FinanceCommandItem command, boolean dryRun) {
+        InvestmentProduct product = resolveInvestmentProduct(ownerEmail, command);
+        LocalDate occurredOn = parseDateOrNull(firstNonBlank(command.paymentDate(), command.occurredOn()));
+        if (dryRun) {
+            return previewed(command.type(), true, "Vou registrar um resgate do produto financeiro.", mapOf(
+                    "produtoFinanceiroId", product.getId(),
+                    "produtoFinanceiro", product.getName(),
+                    "instituicao", product.getInstitutionName(),
+                    "valor", command.amount(),
+                    "data", occurredOn
+            ));
+        }
+        InvestmentMovementResponse response = investmentProductService.withdraw(
+                ownerEmail,
+                product.getId(),
+                investmentMovementRequest(command, "Resgate do produto financeiro")
+        );
+        return executed(command.type(), "Resgate do produto financeiro registrado com sucesso.", mapOf("investmentMovement", response));
+    }
+
+    private FinanceCommandResult registerInvestmentYield(String ownerEmail, FinanceCommandItem command, boolean dryRun) {
+        InvestmentProduct product = resolveInvestmentProduct(ownerEmail, command);
+        LocalDate occurredOn = parseDateOrNull(command.occurredOn());
+        if (dryRun) {
+            return previewed(command.type(), false, "Vou registrar um rendimento informado no produto financeiro.", mapOf(
+                    "produtoFinanceiroId", product.getId(),
+                    "produtoFinanceiro", product.getName(),
+                    "valor", command.amount(),
+                    "data", occurredOn
+            ));
+        }
+        InvestmentMovementResponse response = investmentProductService.registerYield(
+                ownerEmail,
+                product.getId(),
+                investmentMovementRequest(command, "Rendimento informado")
+        );
+        return executed(command.type(), "Rendimento do produto financeiro registrado com sucesso.", mapOf("investmentMovement", response));
+    }
+
+    private FinanceCommandResult reconcileInvestmentBalance(String ownerEmail, FinanceCommandItem command, boolean dryRun) {
+        InvestmentProduct product = resolveInvestmentProduct(ownerEmail, command);
+        BigDecimal realAmount = firstNonNull(command.realCurrentAmount(), command.currentAmount());
+        LocalDate occurredOn = parseDateOrNull(command.occurredOn());
+        if (dryRun) {
+            return previewed(command.type(), true, "Vou reconciliar o saldo atual real do produto financeiro.", mapOf(
+                    "produtoFinanceiroId", product.getId(),
+                    "produtoFinanceiro", product.getName(),
+                    "saldoReal", realAmount,
+                    "data", occurredOn
+            ));
+        }
+        InvestmentProductResponse response = investmentProductService.reconcileCurrentAmount(
+                ownerEmail,
+                product.getId(),
+                realAmount,
+                occurredOn,
+                firstNonBlank(command.notes(), originalMessage(command))
+        );
+        return executed(command.type(), "Saldo do produto financeiro reconciliado com sucesso.", mapOf("investmentProduct", response));
+    }
+
+    private FinanceCommandResult createInvestmentContributionPlan(String ownerEmail, FinanceCommandItem command, boolean dryRun) {
+        Long cycleId = resolveCycleId(ownerEmail, command);
+        InvestmentProduct product = resolveInvestmentProduct(ownerEmail, command);
+        LocalDate dueDate = parseDateOrToday(command.dueDate() == null ? command.occurredOn() : command.dueDate());
+        if (dryRun) {
+            return previewed(command.type(), true, "Vou criar um aporte planejado de investimento no ciclo mensal.", mapOf(
+                    "cicloId", cycleId,
+                    "produtoFinanceiroId", product.getId(),
+                    "produtoFinanceiro", product.getName(),
+                    "valor", command.amount(),
+                    "dataPrevista", dueDate,
+                    "recorrente", command.recurring(),
+                    "limiteRecorrencia", command.recurrenceEndDate()
+            ));
+        }
+        InvestmentContributionPlanResponse response = investmentContributionPlanService.create(
+                ownerEmail,
+                cycleId,
+                product.getId(),
+                new InvestmentContributionPlanRequest(
+                        cycleId,
+                        command.amount(),
+                        dueDate,
+                        command.recurring(),
+                        parseDateOrNull(command.recurrenceEndDate()),
+                        command.notes()
+                )
+        );
+        return executed(command.type(), "Aporte planejado de investimento criado no ciclo mensal.", mapOf("investmentContributionPlan", response));
     }
 
 
@@ -864,6 +1031,21 @@ public class FinanceCommandExecutor {
         return type != null && type != FinanceCommandType.CREATE_CATEGORY;
     }
 
+    private void requireInvestmentSharingForCommand(String ownerEmail, FinanceCommandType type) {
+        if (isInvestmentCommand(type)) {
+            privacySettingsService.requireInvestmentProductsShared(ownerEmail);
+        }
+    }
+
+    private boolean isInvestmentCommand(FinanceCommandType type) {
+        return type == FinanceCommandType.CREATE_INVESTMENT_PRODUCT
+                || type == FinanceCommandType.CONTRIBUTE_INVESTMENT_PRODUCT
+                || type == FinanceCommandType.WITHDRAW_INVESTMENT_PRODUCT
+                || type == FinanceCommandType.REGISTER_INVESTMENT_YIELD
+                || type == FinanceCommandType.RECONCILE_INVESTMENT_BALANCE
+                || type == FinanceCommandType.CREATE_INVESTMENT_CONTRIBUTION_PLAN;
+    }
+
     private FinanceCommandBatchResponse confirmationBlocked(String ownerEmail, List<FinanceCommandItem> commands, String message) {
         List<FinanceCommandResult> results = commands.stream()
                 .map(command -> new FinanceCommandResult(
@@ -951,6 +1133,27 @@ public class FinanceCommandExecutor {
                 null,
                 command.createIfMissing() == null ? true : command.createIfMissing(),
                 command.notes()
+        );
+    }
+
+    private InvestmentMovementRequest investmentMovementRequest(FinanceCommandItem command, String defaultDescription) {
+        return new InvestmentMovementRequest(
+                command.amount(),
+                parseDateOrNull(firstNonBlank(command.paymentDate(), command.occurredOn())),
+                firstNonBlank(command.description(), defaultDescription),
+                TransactionSource.AI_CHAT,
+                firstNonBlank(command.notes(), originalMessage(command))
+        );
+    }
+
+    private InvestmentProduct resolveInvestmentProduct(String ownerEmail, FinanceCommandItem command) {
+        if (command.investmentProductId() != null) {
+            return investmentProductService.findOwnedProduct(ownerEmail, command.investmentProductId());
+        }
+        return investmentProductService.resolveForAi(
+                ownerEmail,
+                firstNonBlank(command.investmentProductName(), command.description()),
+                command.institutionName()
         );
     }
 
@@ -1073,6 +1276,7 @@ public class FinanceCommandExecutor {
             case "VARIABLE", "VARIAVEL", "VARIÁVEL", "VARIAVEIS", "VARIÁVEIS" -> MonthlyPlanItemNature.VARIABLE;
             case "CREDIT_CARD", "CARTAO", "CARTAO_DE_CREDITO", "CREDITO", "FATURA" -> MonthlyPlanItemNature.CREDIT_CARD;
             case "SAVINGS_JAR", "COFRINHO", "RESERVA", "POUPANCA" -> MonthlyPlanItemNature.SAVINGS_JAR;
+            case "INVESTMENT", "INVESTIMENTO", "INVESTIMENTOS", "PRODUTO_FINANCEIRO", "CAPITALIZACAO", "CAPITALIZAÇÃO" -> MonthlyPlanItemNature.INVESTMENT;
             default -> MonthlyPlanItemNature.valueOf(normalized);
         };
     }

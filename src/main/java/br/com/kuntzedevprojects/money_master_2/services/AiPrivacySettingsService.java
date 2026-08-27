@@ -67,6 +67,7 @@ public class AiPrivacySettingsService {
         settings.setShareMonthlySummary(allowed && valueOrDefault(request.shareMonthlySummary(), settings.isShareMonthlySummary()));
         settings.setShareRecentTransactions(allowed && valueOrDefault(request.shareRecentTransactions(), settings.isShareRecentTransactions()));
         settings.setShareSavingsGoals(allowed && valueOrDefault(request.shareSavingsGoals(), settings.isShareSavingsGoals()));
+        settings.setShareInvestmentProducts(allowed && valueOrDefault(request.shareInvestmentProducts(), settings.isShareInvestmentProducts()));
         settings.setAllowWriteOperations(allowed && valueOrDefault(request.allowWriteOperations(), settings.isAllowWriteOperations()));
         settings.setMaskSensitiveValues(valueOrDefault(request.maskSensitiveValues(), settings.isMaskSensitiveValues()));
         settings.setRetentionDays(normalizeRetentionDays(request.retentionDays(), settings.getRetentionDays()));
@@ -124,6 +125,15 @@ public class AiPrivacySettingsService {
     }
 
     @Transactional
+    public AiPrivacySettings requireInvestmentProductsShared(String ownerEmail) {
+        AiPrivacySettings settings = requireChatAllowed(ownerEmail);
+        if (!settings.isShareInvestmentProducts()) {
+            throw new BusinessException("Investimentos e produtos financeiros nao estao compartilhados com a IA nas configuracoes de Privacidade IA.");
+        }
+        return settings;
+    }
+
+    @Transactional
     public AiPrivacySettings resolve(String ownerEmail) {
         return settingsRepository.findByOwnerEmailIgnoreCase(ownerEmail)
                 .orElseGet(() -> createDefault(ownerEmail));
@@ -143,6 +153,7 @@ public class AiPrivacySettingsService {
         settings.setShareMonthlySummary(false);
         settings.setShareRecentTransactions(false);
         settings.setShareSavingsGoals(false);
+        settings.setShareInvestmentProducts(false);
         settings.setAllowWriteOperations(false);
         settings.setMaskSensitiveValues(true);
         settings.setRetentionDays(DEFAULT_RETENTION_DAYS);

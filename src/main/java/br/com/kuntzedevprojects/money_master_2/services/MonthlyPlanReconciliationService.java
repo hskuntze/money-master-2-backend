@@ -828,6 +828,7 @@ public class MonthlyPlanReconciliationService {
             case "FIXED", "FIXA", "FIXO" -> MonthlyPlanItemNature.FIXED;
             case "VARIABLE", "VARIAVEL", "VARIÁVEL", "VARIAVEIS", "VARIÁVEIS" -> MonthlyPlanItemNature.VARIABLE;
             case "CREDIT_CARD", "CARTAO", "CARTÃO", "CARTAO_CREDITO", "CARTÃO_CRÉDITO", "FATURA" -> MonthlyPlanItemNature.CREDIT_CARD;
+            case "INVESTMENT", "INVESTIMENTO", "INVESTIMENTOS", "PRODUTO_FINANCEIRO", "CAPITALIZACAO", "CAPITALIZAÇÃO" -> MonthlyPlanItemNature.INVESTMENT;
             default -> MonthlyPlanItemNature.valueOf(normalized);
         };
     }

@@ -13,6 +13,7 @@ import br.com.kuntzedevprojects.money_master_2.dtos.finance.FinancialTransaction
 import br.com.kuntzedevprojects.money_master_2.dtos.finance.payment.PaymentRequest;
 import br.com.kuntzedevprojects.money_master_2.dtos.finance.payment.PaymentResponse;
 import br.com.kuntzedevprojects.money_master_2.dtos.finance.payment.PaymentReverseRequest;
+import br.com.kuntzedevprojects.money_master_2.dtos.investment.InvestmentMovementRequest;
 import br.com.kuntzedevprojects.money_master_2.dtos.savingsjar.SavingsJarMovementRequest;
 import br.com.kuntzedevprojects.money_master_2.entities.Account;
 import br.com.kuntzedevprojects.money_master_2.entities.Category;
@@ -38,6 +39,8 @@ import br.com.kuntzedevprojects.money_master_2.services.CurrentUserService;
 import br.com.kuntzedevprojects.money_master_2.services.FinancialPeriodService;
 import br.com.kuntzedevprojects.money_master_2.services.FinancialTransactionService;
 import br.com.kuntzedevprojects.money_master_2.services.SavingsJarService;
+import br.com.kuntzedevprojects.money_master_2.services.finance.investment.InvestmentContributionPlanService;
+import br.com.kuntzedevprojects.money_master_2.services.finance.investment.InvestmentProductService;
 import br.com.kuntzedevprojects.money_master_2.services.finance.savings.SavingsJarContributionPlanService;
 
 @Service
@@ -51,6 +54,7 @@ public class PaymentService {
     private final AccountService accountService;
     private final CategoryService categoryService;
     private final SavingsJarService savingsJarService;
+    private final InvestmentProductService investmentProductService;
 
     public PaymentService(
             PaymentRepository paymentRepository,
@@ -60,7 +64,8 @@ public class PaymentService {
             CurrentUserService currentUserService,
             AccountService accountService,
             CategoryService categoryService,
-            SavingsJarService savingsJarService
+            SavingsJarService savingsJarService,
+            InvestmentProductService investmentProductService
     ) {
         this.paymentRepository = paymentRepository;
         this.transactionRepository = transactionRepository;
@@ -70,6 +75,7 @@ public class PaymentService {
         this.accountService = accountService;
         this.categoryService = categoryService;
         this.savingsJarService = savingsJarService;
+        this.investmentProductService = investmentProductService;
     }
 
     @Transactional(readOnly = true)
@@ -104,6 +110,7 @@ public class PaymentService {
         Payment payment = register(ownerEmail, payable, null, request);
         applyLegacyPaymentState(payable);
         applySavingsJarContribution(ownerEmail, payable, payment, false);
+        applyInvestmentContribution(ownerEmail, payable, payment, false);
         return PaymentResponse.from(payment);
     }
 
@@ -137,6 +144,7 @@ public class PaymentService {
         }
         applyLegacyPaymentState(target);
         applySavingsJarContribution(ownerEmail, target, payment, true);
+        applyInvestmentContribution(ownerEmail, target, payment, true);
         return PaymentResponse.from(payment);
     }
 
@@ -154,6 +162,7 @@ public class PaymentService {
         }
         applyLegacyPaymentState(target);
         applySavingsJarContribution(ownerEmail, target, payment, true);
+        applyInvestmentContribution(ownerEmail, target, payment, true);
     }
 
     @Transactional(readOnly = true)
@@ -332,6 +341,28 @@ public class PaymentService {
             savingsJarService.withdraw(ownerEmail, jarId, request);
         } else {
             savingsJarService.deposit(ownerEmail, jarId, request);
+        }
+    }
+
+    private void applyInvestmentContribution(String ownerEmail, MonthlyPlanItem item, Payment payment, boolean reversing) {
+        if (item == null || item.getNature() != MonthlyPlanItemNature.INVESTMENT || item.getType() != TransactionType.EXPENSE) {
+            return;
+        }
+        Long productId = InvestmentContributionPlanService.parseInvestmentProductId(item.getNotes());
+        if (productId == null) {
+            return;
+        }
+        InvestmentMovementRequest request = new InvestmentMovementRequest(
+                payment.getAmount(),
+                payment.getPaymentDate(),
+                reversing ? "Estorno de aporte planejado" : "Aporte planejado do mes",
+                payment.getSource() == PaymentSource.AI_CHAT ? TransactionSource.AI_CHAT : TransactionSource.MANUAL,
+                "Pagamento #" + payment.getId() + " da obrigacao mensal #" + item.getId()
+        );
+        if (reversing) {
+            investmentProductService.withdraw(ownerEmail, productId, request);
+        } else {
+            investmentProductService.contribute(ownerEmail, productId, request);
         }
     }
 

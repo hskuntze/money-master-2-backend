@@ -15,6 +15,7 @@ public record MonthlySemanticReportResponse(
         CreditCardSection creditCards,
         InstallmentSection installments,
         SavingsJarSection savingsJars,
+        InvestmentSection investments,
         BigDecimal cashBalanceCurrent,
         BigDecimal projectedAvailableAmount,
         List<DailyCashFlowResponse> cashFlow,
@@ -27,6 +28,7 @@ public record MonthlySemanticReportResponse(
             BigDecimal plannedPayablesTotal,
             BigDecimal plannedCreditCardInvoicesTotal,
             BigDecimal plannedSavingsTotal,
+            BigDecimal plannedInvestmentTotal,
             BigDecimal plannedAvailableAmount
     ) {
     }
@@ -36,6 +38,7 @@ public record MonthlySemanticReportResponse(
             BigDecimal paidPayablesTotal,
             BigDecimal paidCreditCardInvoicesTotal,
             BigDecimal actualSavingsTotal,
+            BigDecimal actualInvestmentTotal,
             BigDecimal unplannedIncomeTotal,
             BigDecimal unplannedExpenseTotal,
             BigDecimal realizedAvailableAmount
@@ -63,6 +66,17 @@ public record MonthlySemanticReportResponse(
             BigDecimal monthlyActualContribution,
             BigDecimal totalYield,
             BigDecimal averageProgressPercentage
+    ) {
+    }
+
+    public record InvestmentSection(
+            BigDecimal totalAmount,
+            BigDecimal totalContributed,
+            BigDecimal totalWithdrawn,
+            BigDecimal totalYield,
+            BigDecimal monthlyPlannedContribution,
+            BigDecimal monthlyActualContribution,
+            long activeProductCount
     ) {
     }
 }

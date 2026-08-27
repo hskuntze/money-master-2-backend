@@ -48,6 +48,7 @@ class AiPrivacySettingsServiceTest {
 
         assertThat(response.aiEnabled()).isFalse();
         assertThat(response.consentGranted()).isFalse();
+        assertThat(response.shareInvestmentProducts()).isFalse();
         assertThat(response.allowWriteOperations()).isFalse();
         assertThat(response.maskSensitiveValues()).isTrue();
         assertThat(response.retentionDays()).isEqualTo(30);
@@ -68,6 +69,7 @@ class AiPrivacySettingsServiceTest {
                 false,
                 true,
                 true,
+                true,
                 45
         ));
 
@@ -77,6 +79,7 @@ class AiPrivacySettingsServiceTest {
         assertThat(response.shareMonthlySummary()).isFalse();
         assertThat(response.shareRecentTransactions()).isTrue();
         assertThat(response.shareSavingsGoals()).isFalse();
+        assertThat(response.shareInvestmentProducts()).isTrue();
         assertThat(response.allowWriteOperations()).isTrue();
         assertThat(response.consentGrantedAt()).isNotNull();
         assertThat(response.retentionDays()).isEqualTo(45);
@@ -99,6 +102,23 @@ class AiPrivacySettingsServiceTest {
                 .hasMessageContaining("desativadas");
     }
 
+    @Test
+    void shouldRequireExplicitInvestmentSharing() {
+        AiPrivacySettings settings = existingSettings();
+        settings.setAiEnabled(true);
+        settings.setConsentGranted(true);
+        settings.setShareInvestmentProducts(false);
+        when(settingsRepository.findByOwnerEmailIgnoreCase("ana@example.com")).thenReturn(Optional.of(settings));
+
+        assertThatThrownBy(() -> service.requireInvestmentProductsShared("ana@example.com"))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("Investimentos");
+
+        settings.setShareInvestmentProducts(true);
+
+        assertThat(service.requireInvestmentProductsShared("ana@example.com")).isSameAs(settings);
+    }
+
     private AiPrivacySettings existingSettings() {
         AiPrivacySettings settings = new AiPrivacySettings();
         settings.setOwner(owner());
@@ -108,6 +128,7 @@ class AiPrivacySettingsServiceTest {
         settings.setShareMonthlySummary(false);
         settings.setShareRecentTransactions(false);
         settings.setShareSavingsGoals(false);
+        settings.setShareInvestmentProducts(false);
         settings.setAllowWriteOperations(false);
         settings.setMaskSensitiveValues(true);
         settings.setRetentionDays(30);

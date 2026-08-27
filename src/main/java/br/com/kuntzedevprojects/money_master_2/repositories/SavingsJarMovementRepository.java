@@ -39,6 +39,25 @@ public interface SavingsJarMovementRepository extends JpaRepository<SavingsJarMo
     BigDecimal calculateCurrentAmountUntil(@Param("savingsJarId") Long savingsJarId, @Param("until") LocalDate until);
 
     @Query("""
+            select coalesce(sum(
+                case
+                    when m.type in (
+                        br.com.kuntzedevprojects.money_master_2.enums.SavingsJarMovementType.WITHDRAWAL,
+                        br.com.kuntzedevprojects.money_master_2.enums.SavingsJarMovementType.TRANSFER_OUT
+                    ) then -m.amount
+                    else m.amount
+                end
+            ), 0)
+            from SavingsJarMovement m
+            where lower(m.savingsJar.owner.email) = lower(:ownerEmail)
+              and m.savingsJar.linkedAccount.id = :accountId
+            """)
+    BigDecimal calculateReservedAmountByLinkedAccount(
+            @Param("ownerEmail") String ownerEmail,
+            @Param("accountId") Long accountId
+    );
+
+    @Query("""
             select coalesce(sum(m.amount), 0)
             from SavingsJarMovement m
             where m.savingsJar.id = :savingsJarId

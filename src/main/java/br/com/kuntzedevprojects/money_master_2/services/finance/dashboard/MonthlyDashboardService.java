@@ -14,6 +14,9 @@ import br.com.kuntzedevprojects.money_master_2.dtos.finance.MonthlyPeriodSummary
 import br.com.kuntzedevprojects.money_master_2.dtos.finance.MonthlyPlanItemResponse;
 import br.com.kuntzedevprojects.money_master_2.dtos.finance.cycle.MonthlyCycleResponse;
 import br.com.kuntzedevprojects.money_master_2.dtos.finance.dashboard.MonthlyDashboardAlertResponse;
+import br.com.kuntzedevprojects.money_master_2.dtos.finance.dashboard.MonthlyDashboardBalanceLineResponse;
+import br.com.kuntzedevprojects.money_master_2.dtos.finance.dashboard.MonthlyDashboardBalanceOverviewResponse;
+import br.com.kuntzedevprojects.money_master_2.dtos.finance.dashboard.MonthlyDashboardBalanceViewResponse;
 import br.com.kuntzedevprojects.money_master_2.dtos.finance.dashboard.MonthlyDashboardResponse;
 import br.com.kuntzedevprojects.money_master_2.entities.CreditCardInvoice;
 import br.com.kuntzedevprojects.money_master_2.entities.InstallmentPurchaseEntry;
@@ -62,6 +65,8 @@ public class MonthlyDashboardService {
 
         BigDecimal savingsPlanned = sumItems(items, MonthlyDashboardService::isSavingsPayable, MonthlyPlanItemResponse::expectedAmount);
         BigDecimal savingsActual = sumItems(items, MonthlyDashboardService::isSavingsPayable, MonthlyPlanItemResponse::actualAmount);
+        BigDecimal investmentPlanned = sumItems(items, MonthlyDashboardService::isInvestmentPayable, MonthlyPlanItemResponse::expectedAmount);
+        BigDecimal investmentActual = sumItems(items, MonthlyDashboardService::isInvestmentPayable, MonthlyPlanItemResponse::actualAmount);
 
         BigDecimal invoiceTotal = sumInvoices(invoices, false);
         BigDecimal invoicePaid = sumInvoices(invoices, true);
@@ -70,6 +75,18 @@ public class MonthlyDashboardService {
             invoicePaid = sumItems(items, MonthlyDashboardService::isCreditCardPayable, MonthlyPlanItemResponse::actualAmount);
         }
         BigDecimal invoicePending = invoiceTotal.subtract(invoicePaid).max(zero()).setScale(2, RoundingMode.HALF_UP);
+        BigDecimal plannedExpenseTotal = plannedPayables
+                .add(invoiceTotal)
+                .add(savingsPlanned)
+                .add(investmentPlanned)
+                .setScale(2, RoundingMode.HALF_UP);
+        BigDecimal pendingSavings = savingsPlanned.subtract(savingsActual).max(zero()).setScale(2, RoundingMode.HALF_UP);
+        BigDecimal pendingInvestments = investmentPlanned.subtract(investmentActual).max(zero()).setScale(2, RoundingMode.HALF_UP);
+        BigDecimal pendingExpenseTotal = pendingPayables
+                .add(invoicePending)
+                .add(pendingSavings)
+                .add(pendingInvestments)
+                .setScale(2, RoundingMode.HALF_UP);
 
         BigDecimal installmentsCurrent = sumEntries(entries.stream()
                 .filter(entry -> entry.getFinancialPeriod() != null && cycleId.equals(entry.getFinancialPeriod().getId()))
@@ -91,6 +108,23 @@ public class MonthlyDashboardService {
         BigDecimal realizedAvailable = legacySummary.realizedIncomeTotal()
                 .subtract(legacySummary.realizedExpenseTotal())
                 .setScale(2, RoundingMode.HALF_UP);
+        MonthlyDashboardBalanceOverviewResponse balanceOverview = buildBalanceOverview(
+                legacySummary,
+                plannedPayables,
+                paidPayables,
+                pendingPayables,
+                invoiceTotal,
+                invoicePaid,
+                invoicePending,
+                savingsPlanned,
+                savingsActual,
+                investmentPlanned,
+                investmentActual,
+                plannedExpenseTotal,
+                pendingExpenseTotal,
+                cashBalance,
+                realizedAvailable
+        );
 
         List<MonthlyDashboardAlertResponse> alerts = buildAlerts(
                 items,
@@ -98,7 +132,9 @@ public class MonthlyDashboardService {
                 entries,
                 legacySummary.projectedAvailableAmount(),
                 savingsPlanned,
-                savingsActual
+                savingsActual,
+                investmentPlanned,
+                investmentActual
         );
 
         return new MonthlyDashboardResponse(
@@ -117,14 +153,99 @@ public class MonthlyDashboardService {
                 anticipatedInstallments,
                 savingsPlanned,
                 savingsActual,
+                investmentPlanned,
+                investmentActual,
                 legacySummary.unplannedIncomeTotal(),
                 legacySummary.unplannedExpenseTotal(),
                 cashBalance,
                 legacySummary.plannedAvailableAmount(),
                 realizedAvailable,
                 legacySummary.projectedAvailableAmount(),
+                balanceOverview,
                 alerts
         );
+    }
+
+    private static MonthlyDashboardBalanceOverviewResponse buildBalanceOverview(
+            MonthlyPeriodSummaryResponse legacySummary,
+            BigDecimal plannedPayables,
+            BigDecimal paidPayables,
+            BigDecimal pendingPayables,
+            BigDecimal invoiceTotal,
+            BigDecimal invoicePaid,
+            BigDecimal invoicePending,
+            BigDecimal savingsPlanned,
+            BigDecimal savingsActual,
+            BigDecimal investmentPlanned,
+            BigDecimal investmentActual,
+            BigDecimal plannedExpenseTotal,
+            BigDecimal pendingExpenseTotal,
+            BigDecimal cashBalance,
+            BigDecimal realizedAvailable
+    ) {
+        MonthlyDashboardBalanceViewResponse planning = new MonthlyDashboardBalanceViewResponse(
+                "PLANNING",
+                "Planejamento",
+                "Combina receitas previstas, compromissos do mes, faturas, cofrinhos e baixas ja realizadas.",
+                nullToZero(legacySummary.plannedIncomeTotal()),
+                plannedExpenseTotal,
+                nullToZero(legacySummary.pendingIncomeTotal()),
+                pendingExpenseTotal,
+                nullToZero(legacySummary.projectedAvailableAmount()),
+                List.of(
+                        line("PLANNED_INCOME", "Receitas planejadas", legacySummary.plannedIncomeTotal(), "ADDS",
+                                "Total de receitas previstas para o ciclo."),
+                        line("COMMON_PAYABLES", "Contas planejadas", plannedPayables, "SUBTRACTS",
+                                "Despesas comuns do planejamento, sem faturas de cartao e sem cofrinhos."),
+                        line("CREDIT_CARD_INVOICES", "Faturas do mes", invoiceTotal, "SUBTRACTS",
+                                "Valor esperado ou confirmado das faturas vinculadas ao ciclo."),
+                        line("SAVINGS_GOALS", "Aportes em cofrinhos", savingsPlanned, "SUBTRACTS",
+                                "Intencoes de guardar dinheiro tratadas como compromisso do ciclo."),
+                        line("INVESTMENT_CONTRIBUTIONS", "Aportes em investimentos", investmentPlanned, "SUBTRACTS",
+                                "Aportes planejados para produtos financeiros acompanhados."),
+                        line("PENDING_INCOME", "Receitas pendentes", legacySummary.pendingIncomeTotal(), "INFO",
+                                "Parte das receitas planejadas que ainda nao recebeu baixa."),
+                        line("PENDING_EXPENSES", "Compromissos pendentes", pendingExpenseTotal, "INFO",
+                                "Contas, faturas e aportes planejados que ainda nao foram realizados por completo.")
+                )
+        );
+
+        MonthlyDashboardBalanceViewResponse cash = new MonthlyDashboardBalanceViewResponse(
+                "CASH",
+                "Caixa",
+                "Mostra o dinheiro atualmente registrado nas contas e o resultado efetivamente realizado no ciclo.",
+                nullToZero(legacySummary.realizedIncomeTotal()),
+                nullToZero(legacySummary.realizedExpenseTotal()),
+                zero(),
+                zero(),
+                cashBalance,
+                List.of(
+                        line("CURRENT_ACCOUNT_BALANCE", "Saldo atual em contas", cashBalance, "INFO",
+                                "Soma dos saldos atuais das contas ativas acompanhadas."),
+                        line("RECEIVED_INCOME", "Receitas recebidas", legacySummary.realizedIncomeTotal(), "ADDS",
+                                "Receitas planejadas ou avulsas que ja foram registradas como recebidas no ciclo."),
+                        line("PAID_PAYABLES", "Contas pagas", paidPayables, "SUBTRACTS",
+                                "Despesas comuns do planejamento que ja receberam baixa."),
+                        line("PAID_CREDIT_CARD_INVOICES", "Faturas pagas", invoicePaid, "SUBTRACTS",
+                                "Pagamentos registrados nas faturas do ciclo."),
+                        line("SAVINGS_DONE", "Aportes realizados", savingsActual, "SUBTRACTS",
+                                "Valor efetivamente separado nos cofrinhos durante o ciclo."),
+                        line("INVESTMENTS_DONE", "Investimentos realizados", investmentActual, "SUBTRACTS",
+                                "Valor efetivamente aportado em produtos financeiros durante o ciclo."),
+                        line("REALIZED_RESULT", "Resultado realizado", realizedAvailable, "INFO",
+                                "Receitas realizadas menos despesas realizadas do ciclo.")
+                )
+        );
+
+        return new MonthlyDashboardBalanceOverviewResponse(
+                planning,
+                cash,
+                nullToZero(legacySummary.projectedAvailableAmount()).subtract(cashBalance).setScale(2, RoundingMode.HALF_UP)
+        );
+    }
+
+    private static MonthlyDashboardBalanceLineResponse line(String key, String label, BigDecimal amount, String effect, String explanation) {
+        return new MonthlyDashboardBalanceLineResponse(key, label, nullToZero(amount), effect, explanation);
     }
 
     private static List<MonthlyDashboardAlertResponse> buildAlerts(
@@ -133,7 +254,9 @@ public class MonthlyDashboardService {
             List<InstallmentPurchaseEntry> entries,
             BigDecimal projectedAvailable,
             BigDecimal savingsPlanned,
-            BigDecimal savingsActual
+            BigDecimal savingsActual,
+            BigDecimal investmentPlanned,
+            BigDecimal investmentActual
     ) {
         LocalDate today = LocalDate.now();
         List<MonthlyDashboardAlertResponse> alerts = new ArrayList<>();
@@ -163,6 +286,11 @@ public class MonthlyDashboardService {
                     "Ainda falta aportar " + savingsPlanned.subtract(savingsActual).setScale(2, RoundingMode.HALF_UP) + " no ciclo.", "SAVINGS_JAR", null, null, savingsPlanned.subtract(savingsActual)));
         }
 
+        if (investmentPlanned.signum() > 0 && investmentActual.compareTo(investmentPlanned) < 0) {
+            alerts.add(alert("INVESTMENT_CONTRIBUTION_PENDING", "LOW", "Aporte de investimento pendente",
+                    "Ainda falta aportar " + investmentPlanned.subtract(investmentActual).setScale(2, RoundingMode.HALF_UP) + " em investimentos no ciclo.", "INVESTMENT", null, null, investmentPlanned.subtract(investmentActual)));
+        }
+
         entries.stream()
                 .filter(InstallmentPurchaseEntry::isAnticipated)
                 .limit(3)
@@ -181,7 +309,8 @@ public class MonthlyDashboardService {
                 && item.status() != MonthlyPlanItemStatus.CANCELED
                 && item.aggregationType() != MonthlyPlanItemAggregationType.GROUP_CHILD
                 && item.nature() != MonthlyPlanItemNature.CREDIT_CARD
-                && item.nature() != MonthlyPlanItemNature.SAVINGS_JAR;
+                && item.nature() != MonthlyPlanItemNature.SAVINGS_JAR
+                && item.nature() != MonthlyPlanItemNature.INVESTMENT;
     }
 
     private static boolean isCreditCardPayable(MonthlyPlanItemResponse item) {
@@ -196,6 +325,13 @@ public class MonthlyDashboardService {
                 && item.status() != MonthlyPlanItemStatus.CANCELED
                 && item.aggregationType() != MonthlyPlanItemAggregationType.GROUP_CHILD
                 && item.nature() == MonthlyPlanItemNature.SAVINGS_JAR;
+    }
+
+    private static boolean isInvestmentPayable(MonthlyPlanItemResponse item) {
+        return item.type() == TransactionType.EXPENSE
+                && item.status() != MonthlyPlanItemStatus.CANCELED
+                && item.aggregationType() != MonthlyPlanItemAggregationType.GROUP_CHILD
+                && item.nature() == MonthlyPlanItemNature.INVESTMENT;
     }
 
     private static boolean isOpenInstallment(InstallmentPurchaseEntry entry) {

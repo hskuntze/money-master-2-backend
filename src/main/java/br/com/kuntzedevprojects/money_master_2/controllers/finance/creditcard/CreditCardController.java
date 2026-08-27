@@ -18,6 +18,8 @@ import org.springframework.web.bind.annotation.RestController;
 import br.com.kuntzedevprojects.money_master_2.dtos.auth.MessageResponse;
 import br.com.kuntzedevprojects.money_master_2.dtos.finance.creditcard.CreditCardCreateRequest;
 import br.com.kuntzedevprojects.money_master_2.dtos.finance.creditcard.CreditCardInvoiceCreateRequest;
+import br.com.kuntzedevprojects.money_master_2.dtos.finance.creditcard.CreditCardInvoiceItemConfirmRequest;
+import br.com.kuntzedevprojects.money_master_2.dtos.finance.creditcard.CreditCardInvoiceItemConfirmationCandidateResponse;
 import br.com.kuntzedevprojects.money_master_2.dtos.finance.creditcard.CreditCardInvoiceItemCreateRequest;
 import br.com.kuntzedevprojects.money_master_2.dtos.finance.creditcard.CreditCardInvoiceItemResponse;
 import br.com.kuntzedevprojects.money_master_2.dtos.finance.creditcard.CreditCardInvoiceItemUpdateRequest;
@@ -182,6 +184,25 @@ public class CreditCardController {
             Principal principal
     ) {
         return ResponseEntity.ok(itemService.update(principal.getName(), itemId, request));
+    }
+
+    @PostMapping("/credit-card-invoice-items/{itemId}/confirm")
+    @PreAuthorize("hasAuthority('FINANCE_MANAGE')")
+    public ResponseEntity<CreditCardInvoiceItemResponse> confirmItem(
+            @PathVariable Long itemId,
+            @Valid @RequestBody(required = false) CreditCardInvoiceItemConfirmRequest request,
+            Principal principal
+    ) {
+        return ResponseEntity.ok(itemService.confirm(principal.getName(), itemId, request));
+    }
+
+    @GetMapping("/credit-card-invoice-items/{itemId}/confirmation-candidates")
+    @PreAuthorize("hasAuthority('FINANCE_READ')")
+    public ResponseEntity<List<CreditCardInvoiceItemConfirmationCandidateResponse>> confirmationCandidates(
+            @PathVariable Long itemId,
+            Principal principal
+    ) {
+        return ResponseEntity.ok(itemService.confirmationCandidates(principal.getName(), itemId));
     }
 
     @DeleteMapping("/credit-card-invoice-items/{itemId}")

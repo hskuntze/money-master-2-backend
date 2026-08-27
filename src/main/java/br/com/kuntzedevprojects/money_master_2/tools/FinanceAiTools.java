@@ -26,6 +26,7 @@ import br.com.kuntzedevprojects.money_master_2.dtos.finance.MonthlyPlanItemRespo
 import br.com.kuntzedevprojects.money_master_2.dtos.finance.MonthlyPlanningContextResponse;
 import br.com.kuntzedevprojects.money_master_2.dtos.finance.report.MonthlySemanticReportResponse;
 import br.com.kuntzedevprojects.money_master_2.dtos.installments.InstallmentPurchaseResponse;
+import br.com.kuntzedevprojects.money_master_2.dtos.investment.InvestmentProductResponse;
 import br.com.kuntzedevprojects.money_master_2.dtos.savingsjar.SavingsJarResponse;
 import br.com.kuntzedevprojects.money_master_2.dtos.savingsjar.SavingsJarSummaryResponse;
 import br.com.kuntzedevprojects.money_master_2.entities.AiPrivacySettings;
@@ -42,6 +43,7 @@ import br.com.kuntzedevprojects.money_master_2.services.MonthlyPlanReconciliatio
 import br.com.kuntzedevprojects.money_master_2.services.FinancialTransactionService;
 import br.com.kuntzedevprojects.money_master_2.services.InstallmentPurchaseService;
 import br.com.kuntzedevprojects.money_master_2.services.SavingsJarService;
+import br.com.kuntzedevprojects.money_master_2.services.finance.investment.InvestmentProductService;
 
 @Component
 public class FinanceAiTools {
@@ -56,6 +58,7 @@ public class FinanceAiTools {
     private final FinancialPeriodService financialPeriodService;
     private final MonthlyPlanReconciliationService reconciliationService;
     private final InstallmentPurchaseService installmentPurchaseService;
+    private final InvestmentProductService investmentProductService;
     private final AiPrivacySettingsService privacySettingsService;
 
     public FinanceAiTools(
@@ -69,6 +72,7 @@ public class FinanceAiTools {
             FinancialPeriodService financialPeriodService,
             MonthlyPlanReconciliationService reconciliationService,
             InstallmentPurchaseService installmentPurchaseService,
+            InvestmentProductService investmentProductService,
             AiPrivacySettingsService privacySettingsService
     ) {
         this.currentUserService = currentUserService;
@@ -81,6 +85,7 @@ public class FinanceAiTools {
         this.financialPeriodService = financialPeriodService;
         this.reconciliationService = reconciliationService;
         this.installmentPurchaseService = installmentPurchaseService;
+        this.investmentProductService = investmentProductService;
         this.privacySettingsService = privacySettingsService;
     }
 
@@ -116,15 +121,15 @@ public class FinanceAiTools {
     }
 
 
-    @Tool(description = "Obtem o relatorio mensal semantico do ciclo: planejamento, realizado, faturas, parcelas, cofrinhos, saldos e alertas. Use para responder analises do mes, dashboard, pendencias e impacto financeiro antes de sugerir comandos.")
+    @Tool(description = "Obtem o relatorio mensal semantico do ciclo: planejamento, realizado, faturas, parcelas, cofrinhos, investimentos, saldos e alertas. Use para responder analises do mes, dashboard, pendencias e impacto financeiro antes de sugerir comandos.")
     public MonthlySemanticReportResponse getMonthlySemanticReport(
             @ToolParam(description = "ID do ciclo financeiro. Pode ficar vazio para usar o ciclo atual/da data de referencia.") String periodId,
             @ToolParam(description = "Data de referencia yyyy-MM-dd. Usada quando periodId estiver vazio. Pode ficar vazio para hoje.") String referenceDate
     ) {
         String ownerEmail = currentUserService.currentEmail();
-        requireMonthlyContext(ownerEmail);
+        AiPrivacySettings settings = requireMonthlyContext(ownerEmail);
         FinancialPeriodResponse selectedPeriod = resolvePeriodForTool(ownerEmail, periodId, referenceDate);
-        return reportService.monthlySemantic(ownerEmail, selectedPeriod.id());
+        return reportService.monthlySemantic(ownerEmail, selectedPeriod.id(), settings.isShareInvestmentProducts());
     }
 
     @Tool(description = "Lista compras parceladas do usuario autenticado, com parcelas, status, quantas parcelas foram pagas e quantas ainda estao pendentes. Use antes de dar baixa em parcelas por linguagem natural quando houver nome livre ou possibilidade de ambiguidade.")
@@ -132,6 +137,13 @@ public class FinanceAiTools {
         String ownerEmail = currentUserService.currentEmail();
         requireMonthlyContext(ownerEmail);
         return installmentPurchaseService.list(ownerEmail);
+    }
+
+    @Tool(description = "Lista produtos financeiros/investimentos do usuario autenticado, com saldo atual, aportes, resgates, rendimento, instituicao, conta vinculada e liquidez. Use antes de registrar aporte, resgate, rendimento, reconciliacao de saldo ou aporte planejado por linguagem natural.")
+    public List<InvestmentProductResponse> listInvestmentProducts() {
+        String ownerEmail = currentUserService.currentEmail();
+        privacySettingsService.requireInvestmentProductsShared(ownerEmail);
+        return investmentProductService.list(ownerEmail);
     }
 
     @Tool(description = "Gera uma prévia de comandos financeiros estruturados sem alterar o banco. Para escritas financeiras sensíveis, o backend retorna confirmationToken e confirmationExpiresAt; executeFinanceCommands só executa se receber esse token com o mesmo lote de comandos.")
@@ -333,11 +345,12 @@ public class FinanceAiTools {
         return FinancialPeriodResponse.from(financialPeriodService.findOrCreateForDate(ownerEmail, referenceDate));
     }
 
-    private void requireMonthlyContext(String ownerEmail) {
+    private AiPrivacySettings requireMonthlyContext(String ownerEmail) {
         AiPrivacySettings settings = privacySettingsService.requireChatAllowed(ownerEmail);
         if (!settings.isShareMonthlySummary()) {
             throw new BusinessException("O resumo mensal nao esta compartilhado com a IA nas configuracoes de Privacidade IA.");
         }
+        return settings;
     }
 
     private void requireSavingsContext(String ownerEmail) {

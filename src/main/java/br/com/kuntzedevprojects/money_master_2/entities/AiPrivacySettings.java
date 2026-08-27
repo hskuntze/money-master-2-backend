@@ -54,6 +54,9 @@ public class AiPrivacySettings {
     @Column(name = "share_savings_goals", nullable = false)
     private boolean shareSavingsGoals;
 
+    @Column(name = "share_investment_products", nullable = false)
+    private boolean shareInvestmentProducts;
+
     @Column(name = "allow_write_operations", nullable = false)
     private boolean allowWriteOperations;
 
@@ -144,6 +147,14 @@ public class AiPrivacySettings {
 
     public void setShareSavingsGoals(boolean shareSavingsGoals) {
         this.shareSavingsGoals = shareSavingsGoals;
+    }
+
+    public boolean isShareInvestmentProducts() {
+        return shareInvestmentProducts;
+    }
+
+    public void setShareInvestmentProducts(boolean shareInvestmentProducts) {
+        this.shareInvestmentProducts = shareInvestmentProducts;
     }
 
     public boolean isAllowWriteOperations() {

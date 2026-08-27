@@ -21,12 +21,15 @@ public record MonthlyDashboardResponse(
         BigDecimal anticipatedInstallmentsTotal,
         BigDecimal savingsPlannedTotal,
         BigDecimal savingsActualTotal,
+        BigDecimal investmentPlannedTotal,
+        BigDecimal investmentActualTotal,
         BigDecimal unplannedIncomeTotal,
         BigDecimal unplannedExpenseTotal,
         BigDecimal cashBalanceCurrent,
         BigDecimal plannedAvailableAmount,
         BigDecimal realizedAvailableAmount,
         BigDecimal projectedAvailableAmount,
+        MonthlyDashboardBalanceOverviewResponse balanceOverview,
         List<MonthlyDashboardAlertResponse> alerts
 ) {
 }

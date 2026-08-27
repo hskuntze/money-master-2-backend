@@ -166,6 +166,42 @@ class MonthlyPeriodSummaryCalculatorTest {
     }
 
     @Test
+    void shouldKeepInvoiceAsProjectedExpenseAndLinkedCardPurchasesOutOfUnplannedProjection() {
+        MonthlyPlanItem salary = item(TransactionType.INCOME, "Salario", "5000.00", "5000.00", MonthlyPlanItemStatus.PAID);
+        MonthlyPlanItem invoice = item(TransactionType.EXPENSE, "Fatura Nubank", "750.00", "0.00", MonthlyPlanItemStatus.PENDING);
+        invoice.setAggregationType(MonthlyPlanItemAggregationType.GROUP_PARENT);
+        invoice.setNature(MonthlyPlanItemNature.CREDIT_CARD);
+
+        MonthlyPlanItem invoiceChild = item(TransactionType.EXPENSE, "Xbox", "50.00", "0.00", MonthlyPlanItemStatus.PENDING);
+        invoiceChild.setAggregationType(MonthlyPlanItemAggregationType.GROUP_CHILD);
+        invoiceChild.setNature(MonthlyPlanItemNature.CREDIT_CARD);
+        invoiceChild.setParentItem(invoice);
+
+        FinancialTransaction linkedCardPurchase = transaction(TransactionType.EXPENSE, "Xbox", "50.00");
+        CreditCardInvoiceItem invoiceItem = new CreditCardInvoiceItem();
+        invoiceItem.setId(77L);
+        linkedCardPurchase.setCreditCardInvoiceItem(invoiceItem);
+
+        FinancialTransaction unplannedCashExpense = transaction(TransactionType.EXPENSE, "Farmacia", "120.00");
+
+        MonthlyPeriodSummaryResponse summary = calculator.calculate(
+                period,
+                List.of(salary, invoice, invoiceChild),
+                List.of(linkedCardPurchase, unplannedCashExpense)
+        );
+
+        assertAll(
+                () -> assertMoney("5000.00", summary.plannedIncomeTotal()),
+                () -> assertMoney("750.00", summary.plannedExpenseTotal()),
+                () -> assertMoney("170.00", summary.realizedExpenseTotal()),
+                () -> assertMoney("120.00", summary.unplannedExpenseTotal()),
+                () -> assertMoney("4130.00", summary.projectedAvailableAmount()),
+                () -> assertEquals(1, summary.pendingItems()),
+                () -> assertEquals(1, summary.paidItems())
+        );
+    }
+
+    @Test
     void shouldIncludeCreditCardPurchaseForProjectionWhenNoInvoiceExists() {
         FinancialTransaction cardPurchase = transaction(TransactionType.EXPENSE, "Compra no cartao", "200.00");
         cardPurchase.setAccount(account(AccountType.CREDIT_CARD));

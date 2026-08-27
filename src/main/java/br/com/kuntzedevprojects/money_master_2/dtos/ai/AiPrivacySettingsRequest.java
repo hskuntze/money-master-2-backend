@@ -10,6 +10,7 @@ public record AiPrivacySettingsRequest(
         Boolean shareMonthlySummary,
         Boolean shareRecentTransactions,
         Boolean shareSavingsGoals,
+        Boolean shareInvestmentProducts,
         Boolean allowWriteOperations,
         Boolean maskSensitiveValues,
         @Min(1)

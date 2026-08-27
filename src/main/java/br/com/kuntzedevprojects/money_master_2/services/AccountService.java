@@ -19,23 +19,27 @@ import br.com.kuntzedevprojects.money_master_2.exceptions.BusinessException;
 import br.com.kuntzedevprojects.money_master_2.exceptions.ResourceNotFoundException;
 import br.com.kuntzedevprojects.money_master_2.repositories.AccountRepository;
 import br.com.kuntzedevprojects.money_master_2.repositories.FinancialTransactionRepository;
+import br.com.kuntzedevprojects.money_master_2.repositories.SavingsJarMovementRepository;
 
 @Service
 public class AccountService {
 
     private final AccountRepository accountRepository;
     private final FinancialTransactionRepository transactionRepository;
+    private final SavingsJarMovementRepository savingsJarMovementRepository;
     private final CurrentUserService currentUserService;
     private final FinanceAiProperties financeAiProperties;
 
     public AccountService(
             AccountRepository accountRepository,
             FinancialTransactionRepository transactionRepository,
+            SavingsJarMovementRepository savingsJarMovementRepository,
             CurrentUserService currentUserService,
             FinanceAiProperties financeAiProperties
     ) {
         this.accountRepository = accountRepository;
         this.transactionRepository = transactionRepository;
+        this.savingsJarMovementRepository = savingsJarMovementRepository;
         this.currentUserService = currentUserService;
         this.financeAiProperties = financeAiProperties;
     }
@@ -159,6 +163,8 @@ public class AccountService {
                 .subtract(nullToZero(expenseTotal))
                 .subtract(nullToZero(transferOutTotal))
                 .add(nullToZero(transferInTotal));
+        BigDecimal reservedInSavingsJars = nullToZero(savingsJarMovementRepository.calculateReservedAmountByLinkedAccount(ownerEmail, account.getId()));
+        BigDecimal availableBalance = currentBalance.subtract(reservedInSavingsJars);
 
         return new AccountBalanceResponse(
                 account.getId(),
@@ -168,7 +174,9 @@ public class AccountService {
                 nullToZero(incomeTotal),
                 nullToZero(expenseTotal),
                 nullToZero(transferTotal),
-                currentBalance
+                currentBalance,
+                reservedInSavingsJars,
+                availableBalance
         );
     }
 

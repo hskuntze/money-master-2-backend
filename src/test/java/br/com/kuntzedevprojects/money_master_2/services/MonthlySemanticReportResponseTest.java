@@ -15,7 +15,7 @@ import br.com.kuntzedevprojects.money_master_2.enums.FinancialPeriodStatus;
 class MonthlySemanticReportResponseTest {
 
     @Test
-    void separatesPlanningRealizedCardsInstallmentsAndSavings() {
+    void separatesPlanningRealizedCardsInstallmentsSavingsAndInvestments() {
         MonthlyCycleResponse cycle = new MonthlyCycleResponse(
                 1L,
                 "Junho",
@@ -41,6 +41,7 @@ class MonthlySemanticReportResponseTest {
                         new BigDecimal("1600.00"),
                         new BigDecimal("1200.00"),
                         new BigDecimal("400.00"),
+                        new BigDecimal("250.00"),
                         new BigDecimal("1800.00")
                 ),
                 new MonthlySemanticReportResponse.RealizedSection(
@@ -48,6 +49,7 @@ class MonthlySemanticReportResponseTest {
                         new BigDecimal("900.00"),
                         new BigDecimal("300.00"),
                         new BigDecimal("200.00"),
+                        new BigDecimal("100.00"),
                         BigDecimal.ZERO,
                         BigDecimal.ZERO,
                         new BigDecimal("3100.00")
@@ -70,6 +72,15 @@ class MonthlySemanticReportResponseTest {
                         new BigDecimal("50.00"),
                         new BigDecimal("30.00")
                 ),
+                new MonthlySemanticReportResponse.InvestmentSection(
+                        new BigDecimal("5000.00"),
+                        new BigDecimal("4500.00"),
+                        new BigDecimal("600.00"),
+                        new BigDecimal("1100.00"),
+                        new BigDecimal("250.00"),
+                        new BigDecimal("100.00"),
+                        2
+                ),
                 new BigDecimal("7000.00"),
                 new BigDecimal("1800.00"),
                 List.of(),
@@ -82,5 +93,8 @@ class MonthlySemanticReportResponseTest {
         assertThat(response.realized().paidCreditCardInvoicesTotal()).isEqualByComparingTo("300.00");
         assertThat(response.installments().futureTotal()).isEqualByComparingTo("1000.00");
         assertThat(response.savingsJars().monthlyPlannedContribution()).isEqualByComparingTo("400.00");
+        assertThat(response.planning().plannedInvestmentTotal()).isEqualByComparingTo("250.00");
+        assertThat(response.realized().actualInvestmentTotal()).isEqualByComparingTo("100.00");
+        assertThat(response.investments().totalAmount()).isEqualByComparingTo("5000.00");
     }
 }
