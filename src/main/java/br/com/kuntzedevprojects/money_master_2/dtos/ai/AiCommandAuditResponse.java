@@ -15,6 +15,7 @@ public record AiCommandAuditResponse(
         String message,
         boolean requiresConfirmation,
         AiCommandReversalResponse reversal,
+        AiCommandAuditReversalEventResponse reversalEvent,
         String commandJson,
         String resultJson,
         String errorMessage,
@@ -29,6 +30,7 @@ public record AiCommandAuditResponse(
                 audit.isDryRun(),
                 result == null ? null : result.message(),
                 result != null && result.requiresConfirmation(),
+                null,
                 null,
                 audit.getCommandJson(),
                 audit.getResultJson(),
@@ -47,6 +49,25 @@ public record AiCommandAuditResponse(
                 message,
                 requiresConfirmation,
                 reversal,
+                reversalEvent,
+                commandJson,
+                resultJson,
+                errorMessage,
+                createdAt
+        );
+    }
+
+    public AiCommandAuditResponse withReversalEvent(AiCommandAuditReversalEventResponse reversalEvent) {
+        return new AiCommandAuditResponse(
+                id,
+                conversationId,
+                commandType,
+                status,
+                dryRun,
+                message,
+                requiresConfirmation,
+                reversal,
+                reversalEvent,
                 commandJson,
                 resultJson,
                 errorMessage,

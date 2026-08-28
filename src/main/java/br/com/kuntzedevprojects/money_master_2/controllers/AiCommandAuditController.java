@@ -6,12 +6,18 @@ import java.util.List;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 
+import br.com.kuntzedevprojects.money_master_2.dtos.ai.AiCommandAuditReverseRequest;
+import br.com.kuntzedevprojects.money_master_2.dtos.ai.AiCommandAuditReverseResponse;
 import br.com.kuntzedevprojects.money_master_2.dtos.ai.AiCommandAuditResponse;
 import br.com.kuntzedevprojects.money_master_2.services.AiCommandAuditService;
+import jakarta.validation.Valid;
 
 @RestController
 @RequestMapping("/ai/command-audits")
@@ -30,5 +36,15 @@ public class AiCommandAuditController {
             @RequestParam(required = false) Integer limit
     ) {
         return ResponseEntity.ok(service.listRecent(principal.getName(), limit));
+    }
+
+    @PostMapping("/{id}/reverse")
+    @PreAuthorize("hasAuthority('AI_CHAT_USE') and hasAuthority('FINANCE_MANAGE')")
+    public ResponseEntity<AiCommandAuditReverseResponse> reverse(
+            @PathVariable Long id,
+            @Valid @RequestBody(required = false) AiCommandAuditReverseRequest request,
+            Principal principal
+    ) {
+        return ResponseEntity.ok(service.reverse(principal.getName(), id, request));
     }
 }
